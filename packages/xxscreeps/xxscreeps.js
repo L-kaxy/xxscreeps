@@ -21,6 +21,7 @@ const commands = {
 	start: './dist/engine/service/launcher.js',
 	test: './dist/test/run.js',
 	types: './dist/scripts/types.js',
+	'uniform-terrain': './dist/scripts/uniform-terrain.js',
 };
 const command = specifier.startsWith('file:') ? specifier : commands[specifier ?? 'cli'];
 if (command === undefined) {

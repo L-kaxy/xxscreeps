@@ -33,6 +33,7 @@ import {
 	readPlayerBrackets, readPlayerRecords, readRacing, runKey, scoreKey, startRun,
 } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
+import { applyUniformTerrain, restoreTerrain } from './uniform.js';
 import { isSolid, wallSectorCores } from './walls.js';
 
 // `W7N7` has exits in all four directions and all of them lead to uncontrolled rooms — the same
@@ -1139,12 +1140,73 @@ describe('uniform rooms', () => {
 	};
 
 	test('the ruleset ships with the rule off', () => {
+		// Nothing runs on its own: the interior is only ever stamped when an operator runs
+		// `xxscreeps uniform-terrain`, and there is no configuration key which would do it for them.
 		assert.strictEqual(
-			initializationDefaults.speedrun.uniformRooms,
-			false,
-			'an operator opts in with `uniformRooms: true`',
+			(initializationDefaults.speedrun as Record<string, unknown>).uniformRooms,
+			undefined,
+			'no uniformRooms key to switch on',
 		);
 	});
+
+	test('the command writes the world, and puts it back', () => simulate({})(async ({ shard }) => {
+		const before = await shard.loadWorld();
+		const original = [ ...(await shard.data.get('terrain', { blob: true }))! ];
+		const members = new Set([ ...before.terrain.values() ].flatMap(record => record.sectorControl?.members ?? []));
+		const core = new Set(sectorCoreRooms(before.terrain));
+		assert.ok(members.size > 9, 'the test world carries a sector');
+
+		assert.strictEqual(await restoreTerrain(shard), false, 'there is nothing to restore yet');
+
+		const dry = await applyUniformTerrain(shard, { terrainType: 1, swampType: 0, exitWidth: 8 }, { dryRun: true });
+		assert.strictEqual(dry.written, false, 'a dry run writes nothing');
+		assert.strictEqual(dry.covered, members.size - core.size, 'and still counts the rooms it would cover');
+		assert.deepStrictEqual([ ...(await shard.data.get('terrain', { blob: true }))! ], original, 'the blob is untouched');
+		assert.strictEqual(await shard.data.get('speedrun/terrainBackup', { blob: true }), null, 'and no backup was taken');
+
+		const report = await applyUniformTerrain(shard, { terrainType: 1, swampType: 0, exitWidth: 8 });
+		assert.strictEqual(report.written, true, 'the stamp was written');
+		assert.strictEqual(report.covered, members.size - core.size, 'every room of the interior but the core');
+		assert.ok(report.ringFaces > 0, 'and the highway ring faces which look at one of them');
+		assert.notDeepStrictEqual([ ...(await shard.data.get('terrain', { blob: true }))! ], original, 'a new terrain was written');
+
+		// The world now holds it: covered rooms carry the template, bar the face a room keeps shut at
+		// a core (the four corners of the ring around a core are diagonal to it and keep none).
+		const after = await shard.loadWorld();
+		let exact = 0;
+		let sealed = 0;
+		for (const name of members) {
+			if (core.has(name)) {
+				continue;
+			}
+			const record = after.terrain.get(name);
+			if (record === undefined) {
+				continue;
+			}
+			const buffer = getBuffer(record.terrain);
+			if ([ ...buffer ].every((byte, ii) => byte === report.terrain[ii])) {
+				exact++;
+			} else {
+				sealed++;
+			}
+		}
+		assert.strictEqual(exact + sealed, report.covered, 'every covered room was stamped');
+		assert.ok(exact > 0, 'the plain ones carry the template byte for byte');
+		assert.ok(sealed <= 12, 'and only the rooms which look at a core differ, by the face they keep shut');
+
+		// The terrain from before the stamp is kept. Stamping the same template again writes nothing;
+		// running the command again rolls a *new* terrain of the layout, which is what an operator
+		// asking for one wants, and `--save`/`--template` is what keeps one exactly.
+		const backup = await shard.data.get('speedrun/terrainBackup', { blob: true });
+		assert.deepStrictEqual([ ...backup! ], original, 'the terrain from before the stamp is kept');
+		const again = await applyUniformTerrain(shard, { terrainType: 1, swampType: 0, exitWidth: 8, template: report.terrain });
+		assert.strictEqual(again.written, false, 'the same template twice writes nothing');
+		assert.strictEqual(again.generated, false, 'a template handed in is stamped as it is');
+
+		// The rollback the command offers.
+		assert.strictEqual(await restoreTerrain(shard), true, 'the backup goes back');
+		assert.deepStrictEqual([ ...(await shard.data.get('terrain', { blob: true }))! ], original, 'and the world with it');
+	}));
 
 	test('a generated template opens all four sides the same way', () => {
 		for (const terrainType of [ 1, 2, 28 ]) {

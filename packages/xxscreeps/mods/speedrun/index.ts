@@ -79,20 +79,23 @@ import * as types from 'xxscreeps/tsroot.js';
 //      placement keep working. The original terrain is kept under `speedrun/terrainBackup`. See
 //      `walls.ts` and the second hook in `main.ts`.
 //
-//    - `uniformRooms` (default `false`): every room of each sector's 9x9 interior -- everything but
-//      the core, 72 rooms of the stock world -- is overwritten with one generated template, so no
-//      room is a better start than another. The template is generated the way `generate-room`
-//      generates a room (`uniformTerrainType` 1-28, `uniformSwampType` 0-14), with one change: every
-//      side carries the same centred opening (`uniformExitWidth`, default 8) instead of whatever the
-//      neighbours happen to have, so two rooms built from it share a border tile for tile and the
-//      whole grid walks through. Layouts which come out in several pieces are repaired rather than
-//      rerolled, so all 28 connect. The highway ring is opened on the faces which look at a covered
-//      room (`uniformRingEdges`), or the outermost rooms would advertise exits the ring seals.
-//      Terrain is all that is written: no room blob is rewritten, no object is moved, and the
-//      sources a wall landed next to are reported in the service log for the operator to decide
-//      about. The template is stored, so restarts do not change the world; the terrain from before
-//      the first stamp is kept under `speedrun/terrainBackup`. See `template.ts` for the generator
-//      and `uniform.ts` for the rule.
+//    - `uniform-terrain`, a command rather than a rule -- nothing here runs on its own:
+//
+//         xxscreeps uniform-terrain [--shard shard] [--terrain-type 1-28] [--swamp-type 0-14]
+//                 [--exits 8] [--template file.json] [--save file.json] [--dry-run] [--restore]
+//
+//      It overwrites every room of each sector's 9x9 interior -- everything but the core, 72 rooms of
+//      the stock world -- with one generated template, so no room is a better start than another.
+//      The template is `generate-room`'s own generator (`template.ts`), sharing its layout ranges,
+//      with one change: every side carries the same centred opening (`--exits`) instead of the exits
+//      the neighbours happen to have, so two rooms built from it share a border tile for tile and the
+//      whole grid walks through. A layout which would come out in several pieces is repaired rather
+//      than rerolled, so all 28 connect. Rooms around a core keep the face which looks at it shut,
+//      and the highway ring is opened on the faces which look at a covered room, or the outermost
+//      rooms would advertise exits the ring seals. Terrain is all that is written -- no room blob, no
+//      object -- and the sources a wall landed next to are printed for the operator to decide about,
+//      with a dry run available. `--restore` writes the terrain from before the first stamp back;
+//      it is kept under `speedrun/terrainBackup`. See `uniform.ts` for the write.
 //
 // Providers are resolved as `<modDir>/<provide>.ts` or `<modDir>/<provide>/index.ts`; the ones
 // available are `backend`, `config`, `constants`, `driver`, `game`, `main`, `processor`, `schema`,

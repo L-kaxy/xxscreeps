@@ -54,35 +54,6 @@
                     "description": "Whether the sector cores (each sector's center room plus its eight neighbours) are painted solid on service start: every tile of those nine rooms becomes wall, together with the facing edge of each room around them, because crossing a room border is the step which has to be refused. On unless set to false. Terrain is the only thing written -- no object is deleted, no room blob is rewritten, and the sector record on the center room survives, so deposit and power bank placement keep working. The world's original terrain blob is kept under speedrun/terrainBackup so the wall can be lifted. Takes effect on the service start after the one which writes it.",
                     "type": "boolean",
                     "default": true
-                },
-                "uniformRooms": {
-                    "description": "Whether every room of each sector's interior is overwritten with one shared terrain. Off by default. The template is generated the way generate-room generates a room -- wall layouts 1-28 (uniformTerrainType), swamp layouts 0-14 (uniformSwampType), the same cellular-automaton fill and smoothing -- with one change: every side is opened with the same centred run (uniformExitWidth) instead of the exits the neighbours happen to have, so two rooms built from it share a border tile for tile and the whole grid walks through. A layout which comes out in several pieces is repaired rather than rerolled, so all 28 connect on all four sides. Terrain is the only thing written: no room blob is rewritten and no object is read, moved or deleted, so a source a wall landed next to is reported in the service log rather than moved. Rooms around a core keep the face which looks at it shut, and the highway ring keeps its own terrain except for the tiles of a face which looks at a covered room (uniformRingEdges). The template is generated once and stored, so a restart, a rollback or a redeploy does not change the world; editing a layout key generates a new template and restamps the interior. The world's terrain before the first stamp is kept under speedrun/terrainBackup. Takes effect on the service start after the one which writes it.",
-                    "type": "boolean",
-                    "default": false
-                },
-                "uniformTerrainType": {
-                    "description": "Wall layout for uniformRooms, 1-28: the terrain-type of the generate-room command. Omitted means a random layout, which is rolled once and kept. A layout which leaves the room in several pieces is repaired -- the exits carved into the main region and the pockets walled off -- rather than rerolled, so every layout connects on all four sides.",
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 28
-                },
-                "uniformSwampType": {
-                    "description": "Swamp layout for uniformRooms, 1-14, or 0 for no swamp at all: the swamp-type of the generate-room command. Omitted means a random layout, which is rolled once and kept.",
-                    "type": "integer",
-                    "minimum": 0,
-                    "maximum": 14
-                },
-                "uniformExitWidth": {
-                    "description": "How many tiles wide the opening on every side of the uniformRooms template is. Even, so the opening is centred and symmetric about both axes; the same run on all four sides is what lines two rooms up across a border.",
-                    "type": "integer",
-                    "minimum": 2,
-                    "maximum": 46,
-                    "default": 8
-                },
-                "uniformRingEdges": {
-                    "description": "Whether the highway ring's inward faces are opened to match the uniformRooms template. On by default: a room at the edge of the interior would otherwise advertise an exit the ring seals, and a creep walking out of it would be handed into a wall. Only the tiles of a face which looks at a covered room are written -- the rest of the ring, its own lane ends included, is left exactly as it is.",
-                    "type": "boolean",
-                    "default": true
                 }
             },
             "type": "object"
