@@ -261,7 +261,7 @@ export async function resetExpiredRuns(shard: Shard, time: number) {
 }
 
 /** How long a handed-over run is watched for its next landing before it is left alone. */
-const resetGiveUpAfter = 500;
+const resetGiveUpAfter = 50;
 
 async function resetRun(shard: Shard, runId: string, time: number) {
 	const { run, userId } = parseRunId(runId);
