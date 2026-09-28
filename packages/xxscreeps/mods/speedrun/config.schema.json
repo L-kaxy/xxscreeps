@@ -1,0 +1,17 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "properties": {
+        "speedrun": {
+            "description": "Speedrun ruleset settings",
+            "properties": {
+                "invaders": {
+                    "description": "Whether the periodic raid generator runs. With this off a room's harvest budget is cleared on every tick so no raiding party spawns. A room which banked a budget before this was switched off may still see one last raid.",
+                    "type": "boolean",
+                    "default": false
+                }
+            },
+            "type": "object"
+        }
+    },
+    "type": "object"
+}

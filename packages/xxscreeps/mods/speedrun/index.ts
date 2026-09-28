@@ -3,9 +3,9 @@ import * as types from 'xxscreeps/tsroot.js';
 
 // speedrun — custom ruleset for this shard.
 //
-// This mod is the single place where "speedrun" server rules live, so that the upstream tree
-// stays untouched and the ruleset can be turned on and off per deployment by editing the mods
-// list. Enable it by appending its specifier to `mods` in `.screepsrc.yaml`:
+// This mod is the single place where "speedrun" server rules live, so that the upstream tree stays
+// untouched and the ruleset can be turned on and off per deployment by editing the mods list.
+// Enable it by appending its specifier to `mods` in `.screepsrc.yaml`:
 //
 //    mods:
 //      - xxscreeps/mods/classic
@@ -14,20 +14,20 @@ import * as types from 'xxscreeps/tsroot.js';
 // `classic` is declared as a dependency so that it always loads first: speedrun's rules are
 // expressed as adjustments on top of the vanilla ruleset, not as a replacement for it.
 //
-// No provider namespaces are exposed yet (`provides: null`, the same shape `classic` uses for its
-// aggregator). When the first piece of logic lands, add its namespace here and create the matching
-// file next to this one — providers resolve as `<modDir>/<provide>.ts` or `<modDir>/<provide>/index.ts`:
+// Rules implemented so far, all configured under the `speedrun` key (see `config.ts`):
 //
-//	- 'processor'      → room/shard tick processors, intents
-//	- 'game'           → Game object extensions
-//	- 'constants'      → game constants
-//	- 'config'         → config `defaults` (needs a sibling `config.schema.json`)
-//	- 'schema'         → room/object blob fields (⚠ changes the on-disk schema format)
-//	- 'test'           → tests picked up by `xxscreeps test`
+//    - `invaders` (default `false`): the periodic raid generator is suppressed by keeping rooms
+//      from banking an invasion budget. See `processor.ts` for the mechanism, and `test.ts` for
+//      the assertions which pin it down.
+//
+// Providers are resolved as `<modDir>/<provide>.ts` or `<modDir>/<provide>/index.ts`; the ones
+// available are `backend`, `config`, `constants`, `driver`, `game`, `main`, `processor`, `schema`,
+// `storage`, `terrain` and `test`. Rules which can be added and removed without invalidating
+// already-saved rooms must avoid `schema`, which changes the on-disk room blob format.
 export const manifest: Manifest = {
 	dependencies: [
 		'xxscreeps/mods/classic',
 	],
-	provides: null,
+	provides: [ 'config', 'processor', 'test' ],
 	types,
 };
