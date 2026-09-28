@@ -1,6 +1,8 @@
+import type { RoomObject } from 'xxscreeps/game/object.js';
 import { config } from 'xxscreeps/config/index.js';
 import { registerIntentProcessor, registerRoomTickProcessor } from 'xxscreeps/engine/processor/index.js';
 import { Room } from 'xxscreeps/game/room/index.js';
+import { Ruin } from 'xxscreeps/mods/classic/structure/ruin.js';
 
 // The vanilla raid generator (`mods/classic/invader`) sends a party of three small invaders once a
 // room's harvest budget passes `INVADERS_ENERGY_GOAL`, and only then banks the goal for the next
@@ -43,3 +45,29 @@ if (config.speedrun?.deposits !== true) {
 if (config.speedrun?.powerBanks !== true) {
 	registerIntentProcessor(Room, 'placePowerBank', { before: [ 'placePowerBank' ], internal: true }, () => {});
 }
+
+// A destroyed structure leaves a ruin behind. Every lane which puts one down goes through
+// `Room['#insertObject']` (`game/room/room.ts:168`), so that one method is the whole surface:
+//
+//   - `Structure['#destroy']` hands a ruin over for every structure destroyed in combat or by
+//     decay (`mods/classic/structure/structure.ts:96-101`; a nuke death skips it),
+//   - the two spawn intents do the same for every owned structure of a room which is being handed
+//     to a new player or given up, with a `100000`/`500000` tick decay -- those are the ones which
+//     outlive the fight by hours (`mods/classic/spawn/processor.ts:77`, `:101`).
+//
+// Dropping the object at the door instead of deleting a ruin afterwards means one never reaches a
+// room blob: the schema keeps its `ruin` variant, the on-disk format does not move, and a rollback
+// has no half-written object to pick up. The `EVENT_OBJECT_DESTROYED` entry of the structure which
+// died is still appended, and the store it carried goes with the ruin.
+//
+// The switch is read per insertion so a test can flip it inside a running process; the value in
+// `.screepsrc.yaml` is read while a service boots, so an operator flipping that one still needs a
+// restart. Tombstones -- the other kind of leftover, left by a dying creep -- are a different door
+// (`mods/classic/creep/processor.ts`) and are not touched.
+Room.prototype['#insertObject'] = function(insertObject) {
+	return function(this: Room, object: RoomObject, now?: boolean) {
+		if (config.speedrun?.ruins === true || !(object instanceof Ruin)) {
+			insertObject.call(this, object, now);
+		}
+	};
+}(Room.prototype['#insertObject']);

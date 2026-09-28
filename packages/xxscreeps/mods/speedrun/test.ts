@@ -8,6 +8,8 @@ import { RoomPosition } from 'xxscreeps/game/position.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { TERRAIN_MASK_WALL, TerrainWriter } from 'xxscreeps/game/terrain.js';
 import { create as createCreep } from 'xxscreeps/mods/classic/creep/creep.js';
+import { create as createSpawn } from 'xxscreeps/mods/classic/spawn/spawn.js';
+import { createRuin } from 'xxscreeps/mods/classic/structure/ruin.js';
 import { loadSectorDeposits, setDepositBootstrapScatterForTesting } from 'xxscreeps/mods/modern/deposit/main.js';
 import { dueSectorsAt } from 'xxscreeps/mods/modern/deposit/model.js';
 import { inspectDuePowerBankRoomsForTest, scheduleRoom } from 'xxscreeps/mods/modern/powerbank/model.js';
@@ -346,6 +348,52 @@ describe('mods/speedrun', () => {
 	});
 });
 
+describe('ruin suppression', () => {
+	// `Room['#insertObject']` is the one door a ruin goes through: `Structure['#destroy']` hands one
+	// over for every structure killed in combat or lost to decay, and the two spawn intents do the
+	// same for every owned structure of a room which is being handed to a new player or given up.
+	// The fixture knocks on that door with the object `createRuin` builds for a spawn -- which is
+	// what those lanes hand it -- and the room carries a creep so the object is there to be found.
+	const ruined = simulate({
+		W7N7: room => {
+			room['#insertObject'](createCreep(dummyPos, [ C.MOVE ], 'dummy', '100'));
+			room['#insertObject'](createRuin(createSpawn(new RoomPosition(27, 25, 'W7N7'), '100', 'RuinedSpawn')));
+		},
+	});
+
+	test('the ruleset ships without ruins', () => {
+		assert.strictEqual(
+			initializationDefaults.speedrun.ruins,
+			false,
+			'an operator opts in with `ruins: true`',
+		);
+	});
+
+	test('ruins off: the ruin handed to the room never lands', () => ruined(async ({ player, tick }) => {
+		using suppression = withRuins(false);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await player('100', Game => {
+			assert.strictEqual(Game.rooms.W7N7?.find(C.FIND_RUINS).length, 0, 'no ruin was inserted');
+		});
+	}));
+
+	test('ruins on: the same room keeps it', () => ruined(async ({ player, tick }) => {
+		using suppression = withRuins(true);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await player('100', Game => {
+			const ruins = Game.rooms.W7N7?.find(C.FIND_RUINS);
+			assert.strictEqual(ruins?.length, 1, 'the vanilla ruin is back');
+			assert.strictEqual(ruins?.[0]?.structureType, C.STRUCTURE_SPAWN, 'and it is the ruined spawn');
+		});
+	}));
+});
+
 /** Deterministic placement RNG plus a zero-scatter bootstrap, so the test world's sector comes due at init. */
 function withDepositBootstrap(seed = 1): Disposable {
 	const stack = new DisposableStack();
@@ -361,6 +409,22 @@ function withClaimControllerAllowed(claimController: boolean) {
 	return {
 		[Symbol.dispose]() {
 			sandboxRules.claimController = previous;
+		},
+	};
+}
+
+/** Toggle ruin suppression for one test, restoring whatever the configuration said. */
+function withRuins(ruins: boolean) {
+	const settings = config.speedrun ??= {};
+	const previous = settings.ruins;
+	settings.ruins = ruins;
+	return {
+		[Symbol.dispose]() {
+			if (previous === undefined) {
+				delete settings.ruins;
+			} else {
+				settings.ruins = previous;
+			}
 		},
 	};
 }

@@ -27,6 +27,23 @@ export interface SpeedrunSettings {
 	powerBanks?: boolean;
 
 	/**
+	 * Whether a destroyed structure leaves a ruin behind. With this off a ruin never reaches the
+	 * room: the object `Structure['#destroy']` and the two spawn intents hand to
+	 * `Room['#insertObject']` is dropped at the door (`processor.ts` explains why that one method
+	 * covers every lane), so nothing is left to loot and nothing is left to decay. The two spawn
+	 * intents matter most here -- the ruins of a handover or of an abandoned base carry a
+	 * `100000`/`500000` tick decay and sit in the room for hours, where the ruin of a structure
+	 * killed in combat is gone within `RUIN_DECAY` (500) ticks.
+	 *
+	 * No room blob format changes: the room schema keeps its `ruin` variant and a ruin is never
+	 * written to storage in the first place. The `EVENT_OBJECT_DESTROYED` entry of the structure
+	 * which died is still appended, so combat logs and statistics are unaffected. Tombstones, which
+	 * are what a dying creep leaves, are not touched. Set it to `true` for vanilla ruins.
+	 * @default false
+	 */
+	ruins?: boolean;
+
+	/**
 	 * Whether creeps may claim neutral controllers. With this off `Creep.claimController` returns
 	 * `ERR_INVALID_TARGET` before it records an intent, so no room in the world can change hands.
 	 * Nothing else about controllers changes: `reserveController`, `attackController` and
@@ -88,6 +105,7 @@ export const initializationDefaults = {
 		invaders: false,
 		deposits: false,
 		powerBanks: false,
+		ruins: false,
 		claimController: false,
 		closeCenterNine: true,
 		wallSectorCores: true,
