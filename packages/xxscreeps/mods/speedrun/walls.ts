@@ -1,6 +1,6 @@
 import type { Terrain } from 'xxscreeps/game/terrain.js';
 import { makeSignedRoomName, parseSignedRoomName } from 'xxscreeps/game/room/name.js';
-import { TERRAIN_MASK_WALL, TerrainWriter, getBuffer, packExits } from 'xxscreeps/game/terrain.js';
+import { TERRAIN_MASK_WALL, getBuffer, packExits } from 'xxscreeps/game/terrain.js';
 
 /**
  * The fields of a `World.terrain` entry this module rewrites. Everything else on the record -- in
@@ -17,14 +17,29 @@ export interface TerrainEntry {
 /** The four neighbours of a room, as signed coordinate offsets. */
 const neighbors = [ [ 0, -1 ], [ 1, 0 ], [ 0, 1 ], [ -1, 0 ] ] as const;
 
+/**
+ * Turns one tile of the packed buffer into wall.
+ *
+ * The packing is `game/terrain.ts:22-24`: two bits per tile, four tiles to a byte from the low end,
+ * row-major as `yy * 50 + xx`. This is the arithmetic `TerrainWriter.set` does; it is repeated here
+ * rather than used, because `TerrainWriter`'s constructor types its buffer as
+ * `Uint8Array<ArrayBuffer>` while the buffer behind a `Terrain` is only known to be
+ * `ArrayBufferLike` -- a shard may hand out shared buffers, so the narrower signature is a lie.
+ */
+function setTile(buffer: Uint8Array, xx: number, yy: number) {
+	const index = yy * 50 + xx;
+	if (index >= 0 && index < 2500) {
+		const byte = index >>> 2;
+		const shift = (index & 0x03) << 1;
+		buffer[byte] = (buffer[byte]! & ~(0x03 << shift)) | (TERRAIN_MASK_WALL << shift);
+	}
+}
+
 /** Paints every one of a room's 2500 tiles as wall, in place. */
 function solid(terrain: Terrain) {
-	const writer = new TerrainWriter(getBuffer(terrain));
-	for (let yy = 0; yy < 50; ++yy) {
-		for (let xx = 0; xx < 50; ++xx) {
-			writer.set(xx, yy, TERRAIN_MASK_WALL);
-		}
-	}
+	// Each two-bit tile slot becomes `0b01`, so every byte of the 625-byte buffer becomes
+	// `0b01010101`.
+	getBuffer(terrain).fill(TERRAIN_MASK_WALL * 0b01010101);
 }
 
 /**
@@ -67,17 +82,17 @@ export function wallSectorCores<Record extends TerrainEntry>(terrain: Map<string
 			if (neighbor === undefined) {
 				continue;
 			}
-			const writer = new TerrainWriter(getBuffer(neighbor.terrain));
+			const buffer = getBuffer(neighbor.terrain);
 			if (dx === 0) {
 				// Neighbour above or below: wall the row of it which faces the core.
 				const yy = dy < 0 ? 49 : 0;
 				for (let xx = 0; xx < 50; ++xx) {
-					writer.set(xx, yy, TERRAIN_MASK_WALL);
+					setTile(buffer, xx, yy);
 				}
 			} else {
 				const xx = dx < 0 ? 49 : 0;
 				for (let yy = 0; yy < 50; ++yy) {
-					writer.set(xx, yy, TERRAIN_MASK_WALL);
+					setTile(buffer, xx, yy);
 				}
 			}
 			neighbor.exits = packExits(neighbor.terrain);
