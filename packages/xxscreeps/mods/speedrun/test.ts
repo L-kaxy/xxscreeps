@@ -1,5 +1,7 @@
+import type { Shard } from 'xxscreeps/engine/db/shard.js';
 import type { GameConstructor } from 'xxscreeps/game/index.js';
 import { config } from 'xxscreeps/config/index.js';
+import { pushIntentsForRoomNextTick } from 'xxscreeps/engine/processor/model.js';
 import { runShardInitializers } from 'xxscreeps/engine/processor/shard.js';
 import { intentProcessors } from 'xxscreeps/engine/processor/symbols.js';
 import { Fn } from 'xxscreeps/functional/fn.js';
@@ -7,9 +9,13 @@ import { instanceOfPredicate } from 'xxscreeps/functional/predicate.js';
 import { RoomPosition } from 'xxscreeps/game/position.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { TERRAIN_MASK_WALL, TerrainWriter } from 'xxscreeps/game/terrain.js';
-import { create as createCreep } from 'xxscreeps/mods/classic/creep/creep.js';
+import { StructureController } from 'xxscreeps/mods/classic/controller/controller.js';
+import { Creep, create as createCreep } from 'xxscreeps/mods/classic/creep/creep.js';
+import { StructureWall, create as createWall } from 'xxscreeps/mods/classic/defense/wall.js';
+import { StructureContainer, create as createContainer } from 'xxscreeps/mods/classic/resource/container.js';
+import { StructureRoad, create as createRoad } from 'xxscreeps/mods/classic/road/road.js';
 import { create as createSpawn } from 'xxscreeps/mods/classic/spawn/spawn.js';
-import { createRuin } from 'xxscreeps/mods/classic/structure/ruin.js';
+import { Ruin, createRuin } from 'xxscreeps/mods/classic/structure/ruin.js';
 import { loadSectorDeposits, setDepositBootstrapScatterForTesting } from 'xxscreeps/mods/modern/deposit/main.js';
 import { dueSectorsAt } from 'xxscreeps/mods/modern/deposit/model.js';
 import { inspectDuePowerBankRoomsForTest, scheduleRoom } from 'xxscreeps/mods/modern/powerbank/model.js';
@@ -393,6 +399,155 @@ describe('ruin suppression', () => {
 		});
 	}));
 });
+
+describe('respawn cleanup', () => {
+	// The respawn route reads the *presence* room set and queues one `unspawn` intent per room
+	// (`mods/classic/spawn/backend.ts:192-199`); these tests queue the same intent straight into the
+	// engine. Every fixture leaves a road, a container and a wall standing, none of them owned.
+	const leftoversIn = (room: Room) => room['#objects'].filter(object =>
+		object instanceof StructureRoad ||
+		object instanceof StructureContainer ||
+		object instanceof StructureWall).length;
+
+	test('the ruleset ships with the respawn cleanup on', () => {
+		assert.strictEqual(
+			initializationDefaults.speedrun.respawnCleanup,
+			true,
+			'an operator opts out with `respawnCleanup: false`',
+		);
+	});
+
+	// A room the leaving player controls, next to the road of a neighbour which must not be touched.
+	const held = simulate({
+		W7N7: room => {
+			room['#level'] = 4;
+			room['#user'] = room.controller!['#user'] = '100';
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W7N7'), [ C.MOVE ], 'dummy', '100'));
+			room['#insertObject'](createRoad(new RoomPosition(21, 25, 'W7N7')));
+			room['#insertObject'](createContainer(new RoomPosition(22, 25, 'W7N7')));
+			room['#insertObject'](createWall(new RoomPosition(23, 25, 'W7N7')));
+		},
+		W8N7: room => {
+			room['#insertObject'](createRoad(new RoomPosition(21, 25, 'W8N7')));
+		},
+	});
+
+	test('a room the leaving player held is cleared of its leftovers', () => held(async ({ shard, player, tick, peekRoom }) => {
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await respawn(shard, 'W7N7', '100');
+		await tick();
+		const room = await peekRoom('W7N7', room => ({
+			leftovers: leftoversIn(room),
+			controller: room['#objects'].some(object => object instanceof StructureController),
+			ruins: room['#objects'].filter(object => object instanceof Ruin).length,
+		}));
+		assert.deepStrictEqual(room, { leftovers: 0, controller: true, ruins: 0 });
+		assert.strictEqual(
+			await peekRoom('W8N7', leftoversIn),
+			1,
+			'the room next door is not the respawn of this player',
+		);
+	}));
+
+	// The same leftovers, this time in a room the player never owned: they only had a creep in it.
+	const visited = simulate({
+		W7N7: room => {
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W7N7'), [ C.MOVE ], 'dummy', '100'));
+			room['#insertObject'](createRoad(new RoomPosition(21, 25, 'W7N7')));
+			room['#insertObject'](createContainer(new RoomPosition(22, 25, 'W7N7')));
+			room['#insertObject'](createWall(new RoomPosition(23, 25, 'W7N7')));
+		},
+	});
+
+	test('a room where only a creep was left is cleared while nobody else is in it', () => visited(async ({ shard, player, tick, peekRoom }) => {
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await respawn(shard, 'W7N7', '100');
+		await tick();
+		assert.strictEqual(await peekRoom('W7N7', leftoversIn), 0, 'the leftovers come out');
+	}));
+
+	test('the cleanup is skipped while it is switched off', () => visited(async ({ shard, player, tick, peekRoom }) => {
+		using cleanup = withRespawnCleanup(false);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await respawn(shard, 'W7N7', '100');
+		await tick();
+		assert.strictEqual(await peekRoom('W7N7', leftoversIn), 3, 'the leftovers stay standing');
+	}));
+
+	// The same room again, this time with a creep of another player standing in it.
+	const contested = simulate({
+		W7N7: room => {
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W7N7'), [ C.MOVE ], 'dummy', '100'));
+			room['#insertObject'](createCreep(new RoomPosition(26, 25, 'W7N7'), [ C.MOVE ], 'intruder', '101'));
+			room['#insertObject'](createRoad(new RoomPosition(21, 25, 'W7N7')));
+		},
+	});
+
+	test('a room another player is standing in is left alone', () => contested(async ({ shard, player, tick, peekRoom }) => {
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await respawn(shard, 'W7N7', '100');
+		await tick();
+		const room = await peekRoom('W7N7', room => ({
+			roads: room['#objects'].filter(object => object instanceof StructureRoad).length,
+			creeps: room['#objects'].filter(object => object instanceof Creep).length,
+		}));
+		assert.deepStrictEqual(room, { roads: 1, creeps: 1 }, 'the room was left as it was');
+	}));
+
+	// A room the leaving player was never in, even though the intent names it.
+	const elsewhere = simulate({
+		W7N7: room => {
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W7N7'), [ C.MOVE ], 'dummy', '100'));
+		},
+		W8N7: room => {
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W8N7'), [ C.MOVE ], 'resident', '101'));
+			room['#insertObject'](createRoad(new RoomPosition(21, 25, 'W8N7')));
+		},
+	});
+
+	test('a room the leaving player was never in keeps its leftovers', () => elsewhere(async ({ shard, player, tick, peekRoom }) => {
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await respawn(shard, 'W8N7', '100');
+		await tick();
+		assert.strictEqual(await peekRoom('W8N7', leftoversIn), 1, 'a room they were never in is not theirs to clear');
+	}));
+});
+
+/** Queue the room intent the respawn route queues, without going through the HTTP route. */
+async function respawn(shard: Shard, roomName: string, userId: string) {
+	await pushIntentsForRoomNextTick(shard, roomName, userId, { local: { unspawn: [ [] ] }, internal: true });
+}
+
+/** Toggle the respawn cleanup for one test, restoring whatever the configuration said. */
+function withRespawnCleanup(respawnCleanup: boolean) {
+	const settings = config.speedrun ??= {};
+	const previous = settings.respawnCleanup;
+	settings.respawnCleanup = respawnCleanup;
+	return {
+		[Symbol.dispose]() {
+			if (previous === undefined) {
+				delete settings.respawnCleanup;
+			} else {
+				settings.respawnCleanup = previous;
+			}
+		},
+	};
+}
 
 /** Deterministic placement RNG plus a zero-scatter bootstrap, so the test world's sector comes due at init. */
 function withDepositBootstrap(seed = 1): Disposable {
