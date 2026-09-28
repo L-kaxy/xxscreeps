@@ -3,6 +3,7 @@ import type { Database } from 'xxscreeps/engine/db/index.js';
 import { hooks, makeValidatedQueryRoute } from 'xxscreeps/backend/index.js';
 import * as User from 'xxscreeps/engine/db/user/index.js';
 import { Fn } from 'xxscreeps/functional/fn.js';
+import { speedrunPage } from './page.js';
 import { raceBrackets, readLeaderboard, readPlayerBrackets, readPlayerRecords, readRacing } from './race.js';
 
 // The read side of the race pages, three endpoints:
@@ -132,4 +133,34 @@ hooks.register('route', {
 			users: await usersOf(context.db, list.map(entry => entry.user)),
 		};
 	},
+});
+
+// The page the three endpoints above feed, served from this process rather than injected into the
+// client: the client is the official AngularJS bundle from the Steam package, and a mod cannot add a
+// page or a route to it. What a mod *can* add is the sidebar entry below, and that entry points here.
+hooks.register('middleware', (koa, router) => {
+	router.get([ '/speedrun', '/speedrun/' ], context => {
+		context.type = 'text/html';
+		context.body = speedrunPage;
+	});
+});
+
+// `GET /api/version` carries the sidebar entry the client builds its menu from. `href` is the shape
+// the client's own external links use (its forum and store entries) and `target` opens the page in its
+// own tab; there is no `module`, because the route behind the entry is not one of the client's.
+hooks.register('version', serverData => {
+	serverData.features.push({
+		name: 'speedrun',
+		version: 1,
+		menuData: [ {
+			section: 0,
+			after: 'World',
+			item: {
+				href: '/speedrun',
+				id: 'menu-item-speedrun',
+				label: 'Speedrun',
+				target: '_blank',
+			},
+		} ],
+	});
 });
