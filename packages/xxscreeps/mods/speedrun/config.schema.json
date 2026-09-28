@@ -35,6 +35,11 @@
                     "items": { "type": "integer" },
                     "default": [20000, 40000]
                 },
+                "respawnAfter": {
+                    "description": "How many ticks a run lasts before the server restarts the player, in game ticks (default 40000, i.e. the last bracket). A landing starts the clock; when it runs out the player is handed over like a respawn -- their objects are taken out of their rooms, the controllers released, and a spawn put back down where they landed. That landing starts the next run, so runs follow each other on a fixed cadence. Set to 0 to leave restarts to the player.",
+                    "type": "integer",
+                    "default": 40000
+                },
                 "claimController": {
                     "description": "Whether creeps may claim neutral controllers. Off by default: Creep.claimController returns ERR_INVALID_TARGET before recording an intent, so no room can change hands. reserveController/attackController/upgradeController still work, and a new player's starting room is claimed through its own placeSpawn intent. Set to true to let players claim again.",
                     "type": "boolean",

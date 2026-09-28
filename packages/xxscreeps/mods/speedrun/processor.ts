@@ -93,7 +93,10 @@ if (placeSpawn) {
 	placeSpawn.process = (room: Room, context: ProcessorContext, ...data: unknown[]) => {
 		handover(room, context, ...data);
 		if (raceBrackets().length !== 0) {
-			context.task(startRun(context.shard, me, room.name, Game.time));
+			// The intent carries the tile the spawn went down on (`spawn/processor.ts`), which `race.ts`
+			// records with the run: it is where a restart puts the player back.
+			const [ x, y, name ] = data as [ number, number, string ];
+			context.task(startRun(context.shard, me, room.name, Game.time, { name, x, y }));
 		}
 	};
 }

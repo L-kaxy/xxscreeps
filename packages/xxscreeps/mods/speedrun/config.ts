@@ -76,6 +76,22 @@ export interface SpeedrunSettings {
 	raceBrackets?: number[];
 
 	/**
+	 * How many ticks a run lasts before the server restarts the player, in game ticks. A landing
+	 * starts the clock; when it runs out the player is handed over like a respawn -- every object
+	 * they own is taken out of their rooms, the controllers are released, and a spawn is put back
+	 * down where they landed, on the tile they landed on. That landing starts the next run, so runs
+	 * follow each other on a fixed cadence and a player who walks away is picked up by the next one.
+	 *
+	 * The clock is tick-based, like the brackets, and it is only ever counted from a landing: a
+	 * player who lands again before the window is out drops the previous run and starts a new one,
+	 * and a player whose run was already restarted is not restarted twice. The default is the last
+	 * bracket, so the restart happens once the last result is in. Leave this key out to follow
+	 * `raceBrackets`, or set it to `0` (or less) to leave restarts to the player.
+	 * @default 40000
+	 */
+	respawnAfter?: number;
+
+	/**
 	 * Whether creeps may claim neutral controllers. With this off `Creep.claimController` returns
 	 * `ERR_INVALID_TARGET` before it records an intent, so no room in the world can change hands.
 	 * Nothing else about controllers changes: `reserveController`, `attackController` and
@@ -140,6 +156,7 @@ export const initializationDefaults = {
 		ruins: false,
 		respawnCleanup: true,
 		raceBrackets: [ 20000, 40000 ],
+		respawnAfter: 40000,
 		claimController: false,
 		closeCenterNine: true,
 		wallSectorCores: true,
