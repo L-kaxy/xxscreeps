@@ -24,6 +24,11 @@
                     "type": "boolean",
                     "default": false
                 },
+                "respawnCleanup": {
+                    "description": "Whether the neutral structures a leaving player left behind are cleared out when they respawn. On by default: roads, containers and walls carry no owner, so the vanilla handover leaves them standing for good (a container never decays). A room the player owned or reserved is cleared outright; a room they only had creeps in is cleared only while no other player is standing in it. Container contents go with it and the destruction is logged. Power banks, deposits, portals and controllers are never touched. Set to false to leave the leftovers standing.",
+                    "type": "boolean",
+                    "default": true
+                },
                 "claimController": {
                     "description": "Whether creeps may claim neutral controllers. Off by default: Creep.claimController returns ERR_INVALID_TARGET before recording an intent, so no room can change hands. reserveController/attackController/upgradeController still work, and a new player's starting room is claimed through its own placeSpawn intent. Set to true to let players claim again.",
                     "type": "boolean",

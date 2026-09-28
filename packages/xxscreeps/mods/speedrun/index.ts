@@ -32,6 +32,12 @@ import * as types from 'xxscreeps/tsroot.js';
 //      wrapped in `processor.ts` and a `Ruin` handed to it is dropped before it is queued. Nothing
 //      about the room blob format changes, and the destroy event log entry is still written.
 //
+//    - `respawnCleanup` (default `true`): when a player respawns, the neutral structures they left
+//      behind in the rooms they were using -- roads, containers, walls -- are destroyed with the
+//      rest of the handover. Vanilla takes their owned objects and releases the controllers, but
+//      the unowned ones carry no owner and simply stay. See `respawn.ts` for the mechanism (it
+//      chains the engine's `unspawn` handler) and the guards on the rooms it applies to.
+//
 //    - `claimController` (default `false`): `Creep.claimController` is refused before it records an
 //      intent, so players cannot take a room. `reserveController`, `attackController` and
 //      `upgradeController` are untouched, and the starting room a new player is handed goes through

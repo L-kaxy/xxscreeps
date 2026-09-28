@@ -44,6 +44,23 @@ export interface SpeedrunSettings {
 	ruins?: boolean;
 
 	/**
+	 * Whether the neutral structures a leaving player left behind are cleared out when they respawn.
+	 * A respawn takes every object the player owns out of their rooms and releases the controllers,
+	 * but the structures they built which nobody owns -- roads, containers, walls -- carry no owner,
+	 * so nothing there touches them: a container never decays and stays in the room for good.
+	 *
+	 * On by default, this clears those three types out of the rooms the player was using, in the
+	 * same tick as the handover (`respawn.ts` explains the room list and the guards). A room they
+	 * owned or reserved is cleared outright; a room they only had creeps in is cleared only while no
+	 * other player is standing in it, so a room which is being fought over is left alone. Resources
+	 * stored in a container go with it, and the destruction is logged the same way any kill is. The
+	 * world's own neutral structures -- power banks, deposits, portals and controllers -- are never
+	 * on the list. Set it to `false` to leave the leftovers standing.
+	 * @default true
+	 */
+	respawnCleanup?: boolean;
+
+	/**
 	 * Whether creeps may claim neutral controllers. With this off `Creep.claimController` returns
 	 * `ERR_INVALID_TARGET` before it records an intent, so no room in the world can change hands.
 	 * Nothing else about controllers changes: `reserveController`, `attackController` and
@@ -106,6 +123,7 @@ export const initializationDefaults = {
 		deposits: false,
 		powerBanks: false,
 		ruins: false,
+		respawnCleanup: true,
 		claimController: false,
 		closeCenterNine: true,
 		wallSectorCores: true,

@@ -3,6 +3,9 @@ import { config } from 'xxscreeps/config/index.js';
 import { registerIntentProcessor, registerRoomTickProcessor } from 'xxscreeps/engine/processor/index.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { Ruin } from 'xxscreeps/mods/classic/structure/ruin.js';
+// The respawn rule chains the engine's `unspawn` handler instead of adding a registration of its
+// own, so it lives in a module of its own. See `respawn.ts`.
+import './respawn.js';
 
 // The vanilla raid generator (`mods/classic/invader`) sends a party of three small invaders once a
 // room's harvest budget passes `INVADERS_ENERGY_GOAL`, and only then banks the goal for the next
