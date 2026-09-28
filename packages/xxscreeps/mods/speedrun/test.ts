@@ -33,6 +33,7 @@ import {
 	readPlayerBrackets, readPlayerRecords, readRacing, runKey, scoreKey, startRun,
 } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
+import { applyUniform, generateTemplate, isUniform, templateExitWidth, templateExits, uniformLayout } from './template.js';
 import { applyUniformTerrain, restoreTerrain } from './uniform.js';
 import { isSolid, wallSectorCores } from './walls.js';
 

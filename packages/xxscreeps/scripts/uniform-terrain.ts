@@ -128,8 +128,10 @@ async function main() {
 	}
 
 	const report = await applyUniformTerrain(shard, {
-		terrainType: options.terrainType,
-		swampType: options.swampType,
+		// `exactOptionalPropertyTypes` is on, so an unset flag is left out rather than passed as
+		// `undefined` -- the same shape `generate-room` builds its options in.
+		...options.terrainType === undefined ? {} : { terrainType: options.terrainType },
+		...options.swampType === undefined ? {} : { swampType: options.swampType },
 		exitWidth: exits,
 		...argv.template === undefined ? {} : { template: await readTemplate(argv.template) },
 	}, { dryRun: argv['dry-run'] });
