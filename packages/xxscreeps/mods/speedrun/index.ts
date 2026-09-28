@@ -20,6 +20,13 @@ import * as types from 'xxscreeps/tsroot.js';
 //      from banking an invasion budget. See `processor.ts` for the mechanism, and `test.ts` for
 //      the assertions which pin it down.
 //
+//    - `closeCenterNine` (default `false`): the sector cores -- each sector's center room plus its
+//      eight neighbours, the same central 3x3 the vanilla server's `closeRoom` console command was
+//      aimed at -- are dropped from the world's open-room list on every service start, which is
+//      what `Game.map.getRoomStatus()` reports as `closed`. Nothing inside them is read or deleted,
+//      and no other room is touched. See `main.ts` for the mechanism and `rooms.ts` for how the
+//      rooms are picked (out of the world's own sector records, not out of room names).
+//
 // Providers are resolved as `<modDir>/<provide>.ts` or `<modDir>/<provide>/index.ts`; the ones
 // available are `backend`, `config`, `constants`, `driver`, `game`, `main`, `processor`, `schema`,
 // `storage`, `terrain` and `test`. Rules which can be added and removed without invalidating
@@ -27,7 +34,9 @@ import * as types from 'xxscreeps/tsroot.js';
 export const manifest: Manifest = {
 	dependencies: [
 		'xxscreeps/mods/classic',
+		// The closure rule reads `sectorControl` off the world's terrain records, which this mod owns.
+		'xxscreeps/mods/modern/sector',
 	],
-	provides: [ 'config', 'processor', 'test' ],
+	provides: [ 'config', 'main', 'processor', 'test' ],
 	types,
 };
