@@ -29,6 +29,12 @@
                     "type": "boolean",
                     "default": true
                 },
+                "raceBrackets": {
+                    "description": "Tick offsets after a landing which are recorded as race results, in game ticks (default 20000 and 40000). Each bracket stores one row per run -- RCL level, progress, control points, GCL -- and puts the run in a ranked set, which is what a leaderboard page reads. Offsets are ticks, so a paused shard freezes a race rather than voiding it. A result only lands while the player still holds the room at RCL 2 or above; a superseded run or a lost room simply stops scoring. Empty records nothing.",
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "default": [20000, 40000]
+                },
                 "claimController": {
                     "description": "Whether creeps may claim neutral controllers. Off by default: Creep.claimController returns ERR_INVALID_TARGET before recording an intent, so no room can change hands. reserveController/attackController/upgradeController still work, and a new player's starting room is claimed through its own placeSpawn intent. Set to true to let players claim again.",
                     "type": "boolean",

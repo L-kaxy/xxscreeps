@@ -27,6 +27,7 @@ import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
 import { initializationDefaults } from './config.js';
 import { sandboxRules } from './game.js';
+import { dueRunsKey, rankKey, runKey, scoreKey, startRun } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
 import { isSolid, wallSectorCores } from './walls.js';
 
@@ -544,6 +545,169 @@ function withRespawnCleanup(respawnCleanup: boolean) {
 				delete settings.respawnCleanup;
 			} else {
 				settings.respawnCleanup = previous;
+			}
+		},
+	};
+}
+
+describe('race results', () => {
+	// `W3N3` carries the neutral controller the claim fixtures use, so a landing has one to claim.
+	// `racing` starts that room already held at RCL 3 with 1000 progress -- 200 + 45000 + 1000 control
+	// points -- and far enough from a downgrade that a handful of ticks cannot move it.
+	const landed = simulate({
+		W3N3: room => {
+			room['#insertObject'](createCreep(new RoomPosition(34, 32, 'W3N3'), [ C.MOVE ], 'dummy', '100'));
+		},
+	});
+	const racing = simulate({
+		W3N3: room => {
+			room['#level'] = 3;
+			room['#user'] = room.controller!['#user'] = '100';
+			room.controller!['#progress'] = 1000;
+			room.controller!['#downgradeTime'] = 100000;
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W3N3'), [ C.MOVE ], 'dummy', '100'));
+		},
+	});
+	const foreignRoom = simulate({
+		W3N3: room => {
+			room['#level'] = 3;
+			room['#user'] = room.controller!['#user'] = '101';
+			room.controller!['#progress'] = 1000;
+			room.controller!['#downgradeTime'] = 100000;
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W3N3'), [ C.MOVE ], 'resident', '101'));
+		},
+	});
+
+	test('the ruleset ships with the two brackets', () => {
+		assert.deepStrictEqual(
+			initializationDefaults.speedrun.raceBrackets,
+			[ 20000, 40000 ],
+			'an operator changes the offsets, or passes an empty list to record nothing',
+		);
+	});
+
+	test('a landing starts a run and schedules every bracket', () => landed(async ({ shard, player, tick }) => {
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await land(shard, 'W3N3', '100');
+		await tick();
+		const run = await shard.db.data.hGetAll(runKey('100'));
+		assert.strictEqual(run.room, 'W3N3');
+		assert.strictEqual(run.run, '1');
+		const startedTick = Number(run.startedTick);
+		assert.deepStrictEqual(
+			await shard.data.zRangeWithScores(dueRunsKey, -Infinity, Infinity, { by: 'SCORE' }),
+			[ [ startedTick + 20000, '100:1:20000' ], [ startedTick + 40000, '100:1:40000' ] ],
+		);
+	}));
+
+	test('a bracket is recorded when it comes due', () => racing(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2, 4 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await startRun(shard, '100', 'W3N3', shard.time);
+		await tick(3);
+		const score = await shard.db.data.hGetAll(scoreKey(2, '100:1'));
+		assert.strictEqual(score.bracket, '2');
+		assert.strictEqual(score.controlPoints, '46200');
+		assert.strictEqual(score.level, '3');
+		assert.strictEqual(score.progress, '1000');
+		assert.strictEqual(score.progressTotal, '135000');
+		assert.strictEqual(score.room, 'W3N3');
+		assert.strictEqual(score.run, '1');
+		assert.strictEqual(score.runId, '100:1');
+		assert.strictEqual(score.user, '100');
+		assert.ok(Number(score.at) > 0, 'the entry carries the timestamp it landed at');
+		assert.strictEqual(await shard.db.data.zScore(rankKey(2), '100:1'), 46200);
+		assert.strictEqual(await shard.db.data.zCard(rankKey(4)), 0, 'the later bracket is not due yet');
+		assert.deepStrictEqual(
+			await shard.data.zRange(dueRunsKey, -Infinity, Infinity, { by: 'SCORE' }),
+			[ '100:1:4' ],
+		);
+	}));
+
+	test('a room below RCL 2 does not enter', () => landed(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await land(shard, 'W3N3', '100');
+		await tick(3);
+		assert.deepStrictEqual(await shard.db.data.hGetAll(scoreKey(2, '100:1')), {});
+		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 0);
+	}));
+
+	test('a room which is no longer theirs does not enter', () => foreignRoom(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await startRun(shard, '100', 'W3N3', shard.time);
+		await tick(2);
+		assert.deepStrictEqual(await shard.db.data.hGetAll(scoreKey(2, '100:1')), {});
+		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 0);
+	}));
+
+	test('a superseded run stops scoring, the newer one still scores', () => racing(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 4 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await startRun(shard, '100', 'W3N3', shard.time);
+		await tick();
+		await startRun(shard, '100', 'W3N3', shard.time);
+		await tick(5);
+		assert.deepStrictEqual(await shard.db.data.zRange(rankKey(4), 0, 10), [ '100:2' ]);
+		assert.deepStrictEqual(
+			await shard.db.data.hGetAll(scoreKey(4, '100:1')),
+			{},
+			'the superseded run recorded nothing',
+		);
+		// A third landing keeps what the second one recorded.
+		await startRun(shard, '100', 'W3N3', shard.time);
+		await tick(5);
+		assert.deepStrictEqual(await shard.db.data.zRange(rankKey(4), 0, 10), [ '100:2', '100:3' ]);
+	}));
+
+	test('an empty bracket list records nothing', () => landed(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await land(shard, 'W3N3', '100');
+		await tick();
+		assert.deepStrictEqual(await shard.db.data.hGetAll(runKey('100')), {}, 'no run was started');
+		assert.strictEqual(await shard.data.zCard(dueRunsKey), 0);
+	}));
+});
+
+/** Queue the `placeSpawn` intent a landing goes through (`mods/classic/spawn/backend.ts:172`). */
+async function land(shard: Shard, roomName: string, userId: string) {
+	await pushIntentsForRoomNextTick(shard, roomName, userId, {
+		local: { placeSpawn: [ [ 25, 25, 'Spawn1' ] ] },
+		internal: true,
+	});
+}
+
+/** Set the recorded brackets for one test, restoring whatever the configuration said. */
+function withRaceBrackets(raceBrackets: number[]) {
+	const settings = config.speedrun ??= {};
+	const previous = settings.raceBrackets;
+	settings.raceBrackets = raceBrackets;
+	return {
+		[Symbol.dispose]() {
+			if (previous === undefined) {
+				delete settings.raceBrackets;
+			} else {
+				settings.raceBrackets = previous;
 			}
 		},
 	};

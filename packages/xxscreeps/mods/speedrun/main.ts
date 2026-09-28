@@ -1,7 +1,8 @@
 import { config } from 'xxscreeps/config/index.js';
-import { registerShardInitializer } from 'xxscreeps/engine/processor/index.js';
+import { registerShardInitializer, registerShardTickProcessor } from 'xxscreeps/engine/processor/index.js';
 import { schema as worldSchema } from 'xxscreeps/game/map.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
+import { captureDueBrackets, raceBrackets } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
 import { isSolid, wallSectorCores } from './walls.js';
 
@@ -64,4 +65,15 @@ registerShardInitializer(async shard => {
 		shard.data.set('terrain', makeWriter(worldSchema)(world.terrain)),
 	]);
 	console.log(`speedrun: walled ${core.length} core rooms and sealed ${touched.length - core.length} rooms around them`);
+});
+
+// Race results are captured from the shard tick processor, which the shard service runs once the
+// tick's rooms have all been processed (`engine/service/main.ts:132-133`). That is what makes a result
+// land at the right tick whether or not the player is online: the room blob is read straight out of
+// storage, and a room which went to sleep keeps the state it had. The schedule lives in `shard.data`
+// rather than scratch because it has to survive across ticks -- see `race.ts` for the tables written.
+registerShardTickProcessor(async (shard, time) => {
+	if (raceBrackets().length !== 0) {
+		await captureDueBrackets(shard, time);
+	}
 });
