@@ -27,6 +27,17 @@ export interface SpeedrunSettings {
 	powerBanks?: boolean;
 
 	/**
+	 * Whether creeps may claim neutral controllers. With this off `Creep.claimController` returns
+	 * `ERR_INVALID_TARGET` before it records an intent, so no room in the world can change hands.
+	 * Nothing else about controllers changes: `reserveController`, `attackController` and
+	 * `upgradeController` still work, and the starting room the backend hands a new player is claimed
+	 * through its own `placeSpawn` intent, which does not go through this API. Set it to `true` to
+	 * let players claim again.
+	 * @default false
+	 */
+	claimController?: boolean;
+
+	/**
 	 * Whether the sector cores -- each sector's center room plus its eight neighbours, i.e. the
 	 * central 3x3 -- are closed on every service start. Closing drops the room from the world's
 	 * open-room list, which is what `Game.map.getRoomStatus()` reports as `{ status: 'closed' }`;
@@ -77,6 +88,7 @@ export const initializationDefaults = {
 		invaders: false,
 		deposits: false,
 		powerBanks: false,
+		claimController: false,
 		closeCenterNine: true,
 		wallSectorCores: true,
 	},

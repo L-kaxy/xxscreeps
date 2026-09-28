@@ -26,6 +26,12 @@ import * as types from 'xxscreeps/tsroot.js';
 //      and their schedule; nothing is written to or deleted from the world. See the second half of
 //      `processor.ts`.
 //
+//    - `claimController` (default `false`): `Creep.claimController` is refused before it records an
+//      intent, so players cannot take a room. `reserveController`, `attackController` and
+//      `upgradeController` are untouched, and the starting room a new player is handed goes through
+//      its own `placeSpawn` intent. `game.ts` wraps the method; because a sandbox module cannot
+//      reach `xxscreeps/config`, the switch rides the tick payload (`driver.ts`).
+//
 //    - `closeCenterNine` (default `true`): the sector cores -- each sector's center room plus its
 //      eight neighbours, the same central 3x3 the vanilla server's `closeRoom` console command was
 //      aimed at -- are dropped from the world's open-room list on every service start, which is
@@ -51,6 +57,6 @@ export const manifest: Manifest = {
 		// The closure rule reads `sectorControl` off the world's terrain records, which this mod owns.
 		'xxscreeps/mods/modern/sector',
 	],
-	provides: [ 'config', 'main', 'processor', 'test' ],
+	provides: [ 'config', 'driver', 'game', 'main', 'processor', 'test' ],
 	types,
 };
