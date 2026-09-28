@@ -39,9 +39,6 @@ import { isSolid, wallSectorCores } from './walls.js';
 // fixture `mods/classic/invader` runs its exit filtering against.
 const dummyPos = new RoomPosition(25, 25, 'W7N7');
 
-/** The tile every landing in these tests goes down on, and where a restart puts it back. */
-const spawnSite = { name: 'Spawn1', x: 25, y: 25 };
-
 /** A harvesting room whose budget has not reached the raid threshold yet. */
 const budgeted = simulate({
 	W7N7: room => {
@@ -603,11 +600,6 @@ describe('race results', () => {
 		const run = await shard.db.data.hGetAll(runKey('100'));
 		assert.strictEqual(run.room, 'W3N3');
 		assert.strictEqual(run.run, '1');
-		assert.deepStrictEqual(
-			[ run.spawnName, run.spawnX, run.spawnY ],
-			[ 'Spawn1', '25', '25' ],
-			'the tile the spawn went down on rides along with the run',
-		);
 		const startedTick = Number(run.startedTick);
 		assert.deepStrictEqual(
 			await shard.data.zRangeWithScores(dueRunsKey, -Infinity, Infinity, { by: 'SCORE' }),
@@ -621,7 +613,7 @@ describe('race results', () => {
 			Game.creeps.dummy?.move(C.TOP);
 		});
 		await tick();
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick(3);
 		const score = await shard.db.data.hGetAll(scoreKey(2, '100:1'));
 		assert.strictEqual(score.bracket, '2');
@@ -660,7 +652,7 @@ describe('race results', () => {
 			Game.creeps.dummy?.move(C.TOP);
 		});
 		await tick();
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick(2);
 		assert.deepStrictEqual(await shard.db.data.hGetAll(scoreKey(2, '100:1')), {});
 		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 0);
@@ -672,9 +664,9 @@ describe('race results', () => {
 			Game.creeps.dummy?.move(C.TOP);
 		});
 		await tick();
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick();
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick(5);
 		assert.deepStrictEqual(await shard.db.data.zRange(rankKey(4), 0, 10), [ '100:2' ]);
 		assert.deepStrictEqual(
@@ -683,7 +675,7 @@ describe('race results', () => {
 			'the superseded run recorded nothing',
 		);
 		// A third landing keeps what the second one recorded.
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick(5);
 		assert.deepStrictEqual(await shard.db.data.zRange(rankKey(4), 0, 10), [ '100:2', '100:3' ]);
 	}));
@@ -733,7 +725,7 @@ describe('race pages', () => {
 
 	/** Land one player in a room at the current tick. */
 	async function landIn(shard: Shard, userId: string, roomName: string) {
-		await startRun(shard, userId, roomName, shard.time, spawnSite);
+		await startRun(shard, userId, roomName, shard.time);
 	}
 
 	test('the list holds one row per player, their best first', () => twoRacers(async ({ shard, player, tick }) => {
@@ -887,9 +879,10 @@ describe('race pages', () => {
 	}));
 });
 
-// The restart which closes a run: when the window runs out the server hands the player over and puts
-// a spawn back down on the tile they landed on, which opens their next run. `held` is a room owned at
-// RCL 3, so a landing there has something to lose and something to score.
+// The handover which closes a run: when the window runs out the server respawns the player -- their
+// rooms are handed over and nothing is placed for them, so the run after it starts from the landing
+// they make themselves. `held` is a room owned at RCL 3, so a landing there has something to lose and
+// something to score.
 describe('race restarts', () => {
 	const held = simulate({
 		W3N3: room => {
@@ -901,12 +894,12 @@ describe('race restarts', () => {
 		},
 	});
 
-	/** Give the player an account: a restart is not handed to a user id which is gone. */
+	/** Give the player an account: a handover is not made for a user id which is gone. */
 	async function registered(shard: Shard, userId: string) {
 		await shard.db.data.hSet(infoKey(userId), 'username', `Player ${userId}`);
 	}
 
-	test('a landing is restarted once its window is out', () => held(async ({ shard, player, tick }) => {
+	test('a landing is handed over once its window is out, and nothing is placed back', () => held(async ({ shard, player, tick }) => {
 		using brackets = withRaceBrackets([ 2 ]);
 		using window = withRespawnAfter(2);
 		await player('100', Game => {
@@ -915,28 +908,38 @@ describe('race restarts', () => {
 		await tick();
 		await registered(shard, '100');
 		const started = shard.time;
-		await startRun(shard, '100', 'W3N3', started, spawnSite);
+		await startRun(shard, '100', 'W3N3', started);
 		await tick(3);
 		const ending = await shard.db.data.hGetAll(runKey('100'));
-		assert.strictEqual(ending.endedTick, String(started + 2), 'the handover is queued at the end');
+		assert.strictEqual(ending.endedTick, String(started + 2), 'the handover is queued at the end of the window');
 		assert.strictEqual(ending.run, '1', 'and the run is still the one being closed');
 		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 1, 'the last bracket was scored first');
 		await tick(2);
-		// The handover ran, and the tile went back down: that landing is the next run.
+		// The handover ran. The base is gone, and the tile is left for the player to pick.
+		const room = await shard.loadRoom('W3N3');
+		assert.strictEqual(room['#user'], null, 'the room is nobodys again');
+		assert.strictEqual(room['#level'], 0);
+		assert.strictEqual(Fn.find(room['#objects'], instanceOfPredicate(Creep)), undefined, 'their creeps are gone');
+		assert.strictEqual(
+			Fn.find(room['#objects'], instanceOfPredicate(StructureSpawn)),
+			undefined,
+			'and no spawn was put back for them',
+		);
+		// Their own landing is what opens the next run.
+		await land(shard, 'W3N3', '100');
+		await tick(2);
 		const restarted = await shard.db.data.hGetAll(runKey('100'));
 		assert.strictEqual(restarted.run, '2');
-		assert.strictEqual(restarted.room, 'W3N3', 'in the same room');
-		assert.strictEqual(restarted.spawnX, '25');
-		assert.strictEqual(restarted.endedTick, undefined, 'and the mark is cleared by the landing');
+		assert.strictEqual(restarted.endedTick, undefined, 'the landing clears the mark');
 		assert.strictEqual(await shard.data.zScore(racingKey, '100:2'), Number(restarted.startedTick));
 		assert.deepStrictEqual(await shard.data.zRange(racingKey, 0, 10), [ '100:2' ]);
-		const room = await shard.loadRoom('W3N3');
-		assert.strictEqual(room['#user'], '100', 'the room is theirs again');
-		assert.strictEqual(room['#level'], 1, 'and starts over from the bottom');
-		assert.strictEqual(Fn.find(room['#objects'], instanceOfPredicate(Creep)), undefined, 'their creeps are gone');
-		const spawn = Fn.find(room['#objects'], instanceOfPredicate(StructureSpawn));
-		assert.strictEqual(spawn?.name, 'Spawn1');
-		assert.deepStrictEqual([ spawn?.pos.x, spawn?.pos.y ], [ 25, 25 ], 'on the tile they landed on');
+		const landed = await shard.loadRoom('W3N3');
+		assert.strictEqual(landed['#user'], '100', 'and the room is theirs again');
+		assert.strictEqual(
+			Fn.find(landed['#objects'], instanceOfPredicate(StructureSpawn))?.name,
+			'Spawn1',
+			'with the spawn they placed',
+		);
 	}));
 
 	test('a run inside its window is left alone', () => held(async ({ shard, player, tick }) => {
@@ -947,7 +950,7 @@ describe('race restarts', () => {
 		});
 		await tick();
 		await registered(shard, '100');
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick(5);
 		const run = await shard.db.data.hGetAll(runKey('100'));
 		assert.strictEqual(run.run, '1');
@@ -955,7 +958,7 @@ describe('race restarts', () => {
 		assert.deepStrictEqual(await shard.data.zRange(racingKey, 0, 10), [ '100:1' ]);
 	}));
 
-	test('restarts can be switched off', () => held(async ({ shard, player, tick }) => {
+	test('respawns can be switched off', () => held(async ({ shard, player, tick }) => {
 		using brackets = withRaceBrackets([ 2 ]);
 		using window = withRespawnAfter(0);
 		await player('100', Game => {
@@ -963,13 +966,13 @@ describe('race restarts', () => {
 		});
 		await tick();
 		await registered(shard, '100');
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick(5);
 		assert.strictEqual((await shard.db.data.hGetAll(runKey('100'))).endedTick, undefined);
 		assert.deepStrictEqual(await shard.data.zRange(racingKey, 0, 10), [ '100:1' ]);
 	}));
 
-	test('a run a later landing replaced is not restarted', () => held(async ({ shard, player, tick }) => {
+	test('a run a later landing replaced is not handed over', () => held(async ({ shard, player, tick }) => {
 		using brackets = withRaceBrackets([ 2 ]);
 		using window = withRespawnAfter(100);
 		await player('100', Game => {
@@ -977,9 +980,9 @@ describe('race restarts', () => {
 		});
 		await tick();
 		await registered(shard, '100');
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick();
-		await startRun(shard, '100', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '100', 'W3N3', shard.time);
 		// An entry left behind by the run which was replaced, which is what a stale one looks like.
 		await shard.data.zAdd(racingKey, [ [ 1, '100:1' ] ]);
 		await tick(3);
@@ -989,7 +992,7 @@ describe('race restarts', () => {
 		assert.deepStrictEqual(await shard.data.zRange(racingKey, 0, 10), [ '100:2' ], 'and the stale entry is dropped');
 	}));
 
-	test('a run of an account which is gone is dropped, not restarted', () => held(async ({ shard, player, tick }) => {
+	test('a run of an account which is gone is dropped, not handed over', () => held(async ({ shard, player, tick }) => {
 		using brackets = withRaceBrackets([ 2 ]);
 		using window = withRespawnAfter(2);
 		await player('100', Game => {
@@ -997,10 +1000,28 @@ describe('race restarts', () => {
 		});
 		await tick();
 		// No account record for `404`, so there is nobody to hand anything over to.
-		await startRun(shard, '404', 'W3N3', shard.time, spawnSite);
+		await startRun(shard, '404', 'W3N3', shard.time);
 		await tick(3);
 		assert.strictEqual((await shard.db.data.hGetAll(runKey('404'))).endedTick, undefined);
 		assert.strictEqual(await shard.data.zCard(racingKey), 0, 'the entry is dropped from the board');
+		const room = await shard.loadRoom('W3N3');
+		assert.strictEqual(room['#user'], '100', 'and their room was left alone');
+	}));
+
+	test('a handed-over run nobody lands again is dropped from the clock', () => held(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		using window = withRespawnAfter(2);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await registered(shard, '100');
+		await startRun(shard, '100', 'W3N3', shard.time);
+		await tick(3);
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'handed over, and waiting for a landing');
+		await tick(502);
+		assert.strictEqual(await shard.data.zCard(racingKey), 0, 'and let go of rather than read forever');
+		assert.strictEqual((await shard.db.data.hGetAll(runKey('100'))).run, '1', 'the run itself is left where it was');
 	}));
 });
 

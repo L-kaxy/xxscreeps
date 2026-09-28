@@ -48,12 +48,12 @@ import * as types from 'xxscreeps/tsroot.js';
 //      per player, their best), one player's records, and the runs still in progress.
 //
 //    - `respawnAfter` (default `40000`, i.e. the last bracket): how many ticks a run lasts before the
-//      server restarts the player on its own. When the window runs out, the rooms the player is
+//      server respawns the player on its own. When the window runs out, the rooms the player is
 //      present in are handed over per `unspawn` -- the same handover a respawn does, so
-//      `respawnCleanup` applies -- and `placeSpawn` puts a spawn back down on the tile they landed
-//      on, which opens their next run. It is the shard tick processor which decides, so a player who
-//      has walked away is picked up by the next round, and a run whose room was lost is picked up
-//      too. Set it to `0` to leave restarts to the player.
+//      `respawnCleanup` applies -- and nothing else: no spawn is placed for them, and the next run
+//      starts from the landing they make themselves. It is the shard tick processor which decides,
+//      so a player who has walked away is picked up by the next round, and a run whose room was lost
+//      is picked up too. Set it to `0` to leave respawns to the player.
 //
 //    - `claimController` (default `false`): `Creep.claimController` is refused before it records an
 //      intent, so players cannot take a room. `reserveController`, `attackController` and
