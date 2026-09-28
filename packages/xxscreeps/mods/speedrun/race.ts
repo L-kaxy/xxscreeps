@@ -305,12 +305,24 @@ async function resetRun(shard: Shard, runId: string, time: number) {
 		// (`mods/classic/spawn/backend.ts:200`); a restart leaves nothing behind, so it does too.
 		saveUserFlagBlobForNextTick(shard, userId, undefined),
 	]);
-	if (time - (endedTick ?? time) > resetGiveUpAfter) {
-		// Still no landing: the player has walked away, or is taking their time. Nothing is waiting
-		// on the clock -- their next run starts from the landing, not from here -- so the entry is
-		// dropped rather than read every tick for the rest of the shard's life.
-		await shard.data.zRem(racingKey, [ runId ]);
+	if (time - (endedTick ?? time) <= resetGiveUpAfter) {
+		return;
 	}
+	// The window is out. The rooms are read once more, because a handover which never landed is worth
+	// a line in the log -- that is the one way this goes wrong without looking wrong: the run reads as
+	// restarted while the player is still playing it.
+	const holding = await Promise.all(rooms.map(async roomName => {
+		const room = await shard.loadRoom(roomName, time).catch(() => null);
+		return room === null || room['#user'] === userId
+			|| room['#objects'].some(object => object['#user'] === userId);
+	}));
+	if (holding.some(Boolean)) {
+		console.warn(`speedrun: ${userId} still holds ${rooms.join(' ')} after the restart window`);
+	}
+	// Still no landing: the player has walked away, or is taking their time. Nothing is waiting on the
+	// clock -- their next run starts from the landing, not from here -- so the entry is dropped rather
+	// than read every tick for the rest of the shard's life.
+	await shard.data.zRem(racingKey, [ runId ]);
 }
 
 /** A recorded result, as the pages render it. */
