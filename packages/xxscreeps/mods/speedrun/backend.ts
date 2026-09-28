@@ -145,9 +145,12 @@ hooks.register('middleware', (koa, router) => {
 	});
 });
 
-// `GET /api/version` carries the sidebar entry the client builds its menu from. `href` is the shape
-// the client's own external links use (its forum and store entries) and `target` opens the page in its
-// own tab; there is no `module`, because the route behind the entry is not one of the client's.
+// `GET /api/version` carries the sidebar entry the client builds its menu from. The fields are the
+// ones the client's own items carry -- `label`, `href`, `target`, `svg` -- where `svg` names an icon
+// out of the client's own set (`documentation`, `training`, `ptr`, `inventory`, ...) and `target`
+// opens the page in its own tab, exactly as the Documentation and Public Test Realm entries do. There
+// is no `module`: that field pairs with `routerLink`, and the route behind this entry is not one of
+// the client's.
 hooks.register('version', serverData => {
 	serverData.features.push({
 		name: 'speedrun',
@@ -159,6 +162,7 @@ hooks.register('version', serverData => {
 				href: '/speedrun',
 				id: 'menu-item-speedrun',
 				label: 'Speedrun',
+				svg: 'leaderboard',
 				target: '_blank',
 			},
 		} ],
