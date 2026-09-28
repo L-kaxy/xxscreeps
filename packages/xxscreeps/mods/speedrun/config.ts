@@ -131,6 +131,64 @@ export interface SpeedrunSettings {
 	 * @default true
 	 */
 	wallSectorCores?: boolean;
+
+	/**
+	 * Whether every room of each sector's interior is overwritten with one shared terrain. Off by
+	 * default; an operator turns it on for a shard where no room should be a better start than
+	 * another. The template is generated the way `generate-room` generates a room -- the same wall
+	 * layouts (`uniformTerrainType`), the same swamp layouts (`uniformSwampType`), the same
+	 * cellular-automaton fill and smoothing -- with one change: every side is opened with the same
+	 * centred run (`uniformExitWidth`) rather than with the exits the neighbours happen to have. Two
+	 * rooms built from one template therefore share a border tile for tile, which is what walks the
+	 * whole grid through.
+	 *
+	 * Terrain is the only thing written. No room blob is rewritten and no object is read, moved or
+	 * deleted, so a source a wall landed next to is reported in the service log rather than moved:
+	 * only the operator can decide what to do about it. Rooms around a core keep the face which looks
+	 * at it shut, and the highway ring keeps its own terrain except for the tiles of a face which
+	 * looks at a covered room (`uniformRingEdges`).
+	 *
+	 * The template is generated once and stored, so a restart, a rollback or a redeploy does not
+	 * change the world; editing any of the layout keys generates a new template and restamps the
+	 * interior. The world's terrain before the first stamp is kept under `speedrun/terrainBackup`.
+	 * Takes effect on the service start after the one which writes it, like `wallSectorCores`.
+	 * @default false
+	 */
+	uniformRooms?: boolean;
+
+	/**
+	 * Wall layout for `uniformRooms`, 1-28: the `terrain-type` of the `generate-room` command.
+	 * Omitted means a random layout, which is rolled once and kept. A layout which leaves the room in
+	 * several pieces is repaired rather than rerolled -- the exits carved into the main region and
+	 * the pockets walled off -- so all 28 connect on all four sides.
+	 * @default a random layout, rolled once
+	 */
+	uniformTerrainType?: number;
+
+	/**
+	 * Swamp layout for `uniformRooms`, 1-14, or `0` for no swamp at all: the `swamp-type` of the
+	 * `generate-room` command. Omitted means a random layout, which is rolled once and kept.
+	 * @default a random layout, rolled once
+	 */
+	uniformSwampType?: number;
+
+	/**
+	 * How many tiles wide the opening on every side of the template is. Even, so the opening is
+	 * centred and symmetric about both axes; the same run on all four sides is what lines two rooms
+	 * up across a border.
+	 * @default 8
+	 */
+	uniformExitWidth?: number;
+
+	/**
+	 * Whether the highway ring's inward faces are opened to match the template. On by default: a room
+	 * at the edge of the interior would otherwise advertise an exit the ring seals, and a creep
+	 * walking out of it would be handed into a wall. Only the tiles of a face which looks at a
+	 * covered room are written -- the rest of the ring, its own lane ends included, is left exactly
+	 * as it is.
+	 * @default true
+	 */
+	uniformRingEdges?: boolean;
 }
 
 export interface SpeedrunConfig {
@@ -160,5 +218,10 @@ export const initializationDefaults = {
 		claimController: false,
 		closeCenterNine: true,
 		wallSectorCores: true,
+		uniformRooms: false,
+		uniformExitWidth: 8,
+		uniformRingEdges: true,
+		// `uniformTerrainType` and `uniformSwampType` are left out on purpose: unset means a random
+		// layout, rolled once and kept, the way `generate-room` rolls what is not passed to it.
 	},
 } satisfies SpeedrunConfig;
