@@ -28,6 +28,13 @@ import * as types from 'xxscreeps/tsroot.js';
 //      rooms are picked (out of the world's own sector records, not out of room names). Set it to
 //      `false` on a shard which wants its cores playable.
 //
+//    - `wallSectorCores` (default `true`): the nine rooms of each sector core are painted solid, and
+//      so are the facing edges of the rooms around them -- a creep crossing a room border is
+//      validated against the room it is leaving, so the core alone would not keep anybody out. No
+//      object is read, moved or deleted and the sector record survives, so deposit and power bank
+//      placement keep working. The original terrain is kept under `speedrun/terrainBackup`. See
+//      `walls.ts` and the second hook in `main.ts`.
+//
 // Providers are resolved as `<modDir>/<provide>.ts` or `<modDir>/<provide>/index.ts`; the ones
 // available are `backend`, `config`, `constants`, `driver`, `game`, `main`, `processor`, `schema`,
 // `storage`, `terrain` and `test`. Rules which can be added and removed without invalidating

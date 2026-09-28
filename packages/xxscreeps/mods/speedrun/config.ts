@@ -17,6 +17,25 @@ export interface SpeedrunSettings {
 	 * @default true
 	 */
 	closeCenterNine?: boolean;
+
+	/**
+	 * Whether the sector cores are painted solid on service start: every tile of the nine rooms of
+	 * each core becomes wall, together with the facing edge of the room on each side of them -- the
+	 * row a creep would have to walk along before it is handed across the border into the core, which
+	 * is the step that has to be refused (`walls.ts` explains why the core alone would not be
+	 * enough). On unless this is set to `false`, so a shard gets a solid core without editing
+	 * anything.
+	 *
+	 * Terrain is the only thing written. Nothing inside the rooms is read, moved or deleted, no room
+	 * blob is rewritten, and the sector record on the center room survives, so the deposit and power
+	 * bank schedules which read their highway rooms out of it keep working. The world's original
+	 * terrain blob is kept under `speedrun/terrainBackup`, so writing that back lifts the wall.
+	 *
+	 * Services read the world blob while they boot, so a wall written by this rule takes effect on
+	 * the service start *after* the one which writes it.
+	 * @default true
+	 */
+	wallSectorCores?: boolean;
 }
 
 export interface SpeedrunConfig {
@@ -38,5 +57,6 @@ export const initializationDefaults = {
 	speedrun: {
 		invaders: false,
 		closeCenterNine: true,
+		wallSectorCores: true,
 	},
 } satisfies SpeedrunConfig;

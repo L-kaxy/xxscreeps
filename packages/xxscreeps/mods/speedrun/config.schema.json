@@ -13,6 +13,11 @@
                     "description": "Whether the sector cores (each sector's center room plus its eight neighbours, the central 3x3) are closed on every service start. On by default. Closing drops the room from the world's open-room list, which Game.map.getRoomStatus() reports as `closed`; nothing inside the room is deleted and no other room is touched. The rooms are read from the world's own sector records. Set to false on a shard which wants its cores playable.",
                     "type": "boolean",
                     "default": true
+                },
+                "wallSectorCores": {
+                    "description": "Whether the sector cores (each sector's center room plus its eight neighbours) are painted solid on service start: every tile of those nine rooms becomes wall, together with the facing edge of each room around them, because crossing a room border is the step which has to be refused. On unless set to false. Terrain is the only thing written -- no object is deleted, no room blob is rewritten, and the sector record on the center room survives, so deposit and power bank placement keep working. The world's original terrain blob is kept under speedrun/terrainBackup so the wall can be lifted. Takes effect on the service start after the one which writes it.",
+                    "type": "boolean",
+                    "default": true
                 }
             },
             "type": "object"
