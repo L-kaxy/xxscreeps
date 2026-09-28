@@ -1,9 +1,7 @@
 import type { Shard } from 'xxscreeps/engine/db/shard.js';
 import { config } from 'xxscreeps/config/index.js';
 import * as User from 'xxscreeps/engine/db/user/index.js';
-import { pushIntentsForRoomNextTick, userToPresenceRoomsSetKey } from 'xxscreeps/engine/processor/model.js';
-import { controlledRoomsKey } from 'xxscreeps/mods/classic/controller/model.js';
-import { saveUserFlagBlobForNextTick } from 'xxscreeps/mods/meta/flag/model.js';
+import { respawnPlayer } from 'xxscreeps/mods/classic/spawn/model.js';
 import * as C from 'xxscreeps:mods/constants';
 
 // Racing results: how far a player's room had come a fixed number of ticks after they landed in it.
@@ -282,29 +280,12 @@ async function resetRun(shard: Shard, runId: string, time: number) {
 		// is measured from.
 		await shard.db.data.hSet(runKey(userId), 'endedTick', String(time));
 	}
-	// The handover goes out on every tick of the window rather than once, because the first one can
-	// miss: the presence set lives in scratch and is empty for a player who is not around, and a
-	// handover nobody performs is invisible from the outside -- the run reads as restarted while the
-	// player is still playing it. Two safety nets go with that. The rooms the player controls are
-	// handed over beside the rooms they are present in, and the room the run started in is always
-	// named, so there is a target even when both sets are empty. Queuing an intent also wakes the
-	// room it is for, and `unspawn` ignores a room which holds nothing of theirs, so a repeat costs
-	// two reads and a no-op.
-	const [ presence, controlled ] = await Promise.all([
-		shard.scratch.sMembers(userToPresenceRoomsSetKey(userId)),
-		shard.scratch.sMembers(controlledRoomsKey(userId)),
-	]);
-	const rooms = [ ...new Set([ ...presence, ...controlled, info.room ]) ]
-		.filter((roomName): roomName is string => roomName !== undefined);
-	await Promise.all([
-		...rooms.map(roomName => pushIntentsForRoomNextTick(shard, roomName, userId, {
-			local: { unspawn: [ [] ] },
-			internal: true,
-		})),
-		// The respawn route clears the player's flags along with the handover
-		// (`mods/classic/spawn/backend.ts:200`); a restart leaves nothing behind, so it does too.
-		saveUserFlagBlobForNextTick(shard, userId, undefined),
-	]);
+	// The handover is the respawn itself rather than a lookalike: the same call the `/api/user/respawn`
+	// route makes, with the room the run started in named as the one room there always is a name for.
+	// It goes out on every tick of the window rather than once, because a handover can miss -- and one
+	// nobody performs is invisible from the outside, leaving the player playing a run which reads as
+	// restarted.
+	const rooms = await respawnPlayer(shard, userId, info.room === undefined ? [] : [ info.room ]);
 	if (time - (endedTick ?? time) <= resetGiveUpAfter) {
 		return;
 	}
