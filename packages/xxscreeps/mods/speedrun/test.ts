@@ -1,3 +1,4 @@
+import type { GameConstructor } from 'xxscreeps/game/index.js';
 import { config } from 'xxscreeps/config/index.js';
 import { runShardInitializers } from 'xxscreeps/engine/processor/shard.js';
 import { intentProcessors } from 'xxscreeps/engine/processor/symbols.js';
@@ -17,6 +18,7 @@ import { testWorld } from 'xxscreeps/test/import.js';
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
 import { initializationDefaults } from './config.js';
+import { sandboxRules } from './game.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
 import { isSolid, wallSectorCores } from './walls.js';
 
@@ -295,6 +297,53 @@ describe('mods/speedrun', () => {
 			assert.strictEqual(room['#nextPowerBankTime'], 0, 'the room was not written to');
 		}));
 	});
+
+	describe('claim rejection', () => {
+		test('the ruleset ships with claiming disabled', () => {
+			assert.strictEqual(
+				initializationDefaults.speedrun.claimController,
+				false,
+				'an operator opts in with `claimController: true`',
+			);
+		});
+
+		// `W3N3` carries a neutral controller at (33,32) and a creep next to it with a CLAIM part is
+		// the fixture `mods/classic/controller` claims with; GCL 1 with no controlled rooms satisfies
+		// the GCL check, so vanilla decides the claim on the controller itself.
+		const claimable = simulate({
+			W3N3: room => {
+				room['#insertObject'](createCreep(new RoomPosition(34, 32, 'W3N3'), [ C.CLAIM, C.MOVE ], 'claimer', '100'));
+			},
+		});
+
+		function withGclLevelOne(Game: GameConstructor) {
+			Game.gcl = { level: 1, progress: 0, progressTotal: C.GCL_MULTIPLY, '#roomCount': 0 };
+		}
+
+		test('claimController is refused while the ruleset has it off', () => claimable(async ({ player }) => {
+			using claim = withClaimControllerAllowed(false);
+			await player('100', Game => {
+				withGclLevelOne(Game);
+				assert.strictEqual(
+					Game.creeps.claimer?.claimController(Game.rooms.W3N3!.controller!),
+					C.ERR_INVALID_TARGET,
+					'the ruleset refuses the claim before an intent is recorded',
+				);
+			});
+		}));
+
+		test('vanilla claiming decides again when the switch is on', () => claimable(async ({ player }) => {
+			using claim = withClaimControllerAllowed(true);
+			await player('100', Game => {
+				withGclLevelOne(Game);
+				assert.strictEqual(
+					Game.creeps.claimer?.claimController(Game.rooms.W3N3!.controller!),
+					C.OK,
+					'the vanilla check is the one which answers',
+				);
+			});
+		}));
+	});
 });
 
 /** Deterministic placement RNG plus a zero-scatter bootstrap, so the test world's sector comes due at init. */
@@ -303,6 +352,17 @@ function withDepositBootstrap(seed = 1): Disposable {
 	stack.use(deterministicRandomForTesting(seed));
 	stack.use(setDepositBootstrapScatterForTesting(() => 0));
 	return stack;
+}
+
+/** Drive the sandbox switch `driver.ts` stamps onto the tick payload, restoring whatever it was. */
+function withClaimControllerAllowed(claimController: boolean) {
+	const previous = sandboxRules.claimController;
+	sandboxRules.claimController = claimController;
+	return {
+		[Symbol.dispose]() {
+			sandboxRules.claimController = previous;
+		},
+	};
 }
 
 /** Toggle raid generation for one test, restoring whatever the configuration said. */

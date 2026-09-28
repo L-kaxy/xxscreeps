@@ -19,6 +19,11 @@
                     "type": "boolean",
                     "default": false
                 },
+                "claimController": {
+                    "description": "Whether creeps may claim neutral controllers. Off by default: Creep.claimController returns ERR_INVALID_TARGET before recording an intent, so no room can change hands. reserveController/attackController/upgradeController still work, and a new player's starting room is claimed through its own placeSpawn intent. Set to true to let players claim again.",
+                    "type": "boolean",
+                    "default": false
+                },
                 "closeCenterNine": {
                     "description": "Whether the sector cores (each sector's center room plus its eight neighbours, the central 3x3) are closed on every service start. On by default. Closing drops the room from the world's open-room list, which Game.map.getRoomStatus() reports as `closed`; nothing inside the room is deleted and no other room is touched. The rooms are read from the world's own sector records. Set to false on a shard which wants its cores playable.",
                     "type": "boolean",
