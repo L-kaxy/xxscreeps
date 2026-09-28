@@ -34,10 +34,11 @@ import * as C from 'xxscreeps:mods/constants';
 // bar; see `captureBracket`. Between them, that covers `unclaim`, a downgrade to zero and a respawn:
 // the run stops scoring and the player simply has no further results.
 //
-// A run also ends on its own: `respawnAfter` ticks after the landing the server picks the player up
-// and puts them back down where they started, which is `resetExpiredRuns` below. A run is timed from
-// its landing until it is restarted or superseded, whether or not the room is still held, so an
-// abandoned base is picked up by the next round instead of being left spent.
+// A run also ends on its own: `respawnAfter` ticks after the landing the server hands the player
+// over -- the same `unspawn` a respawn does, and nothing else, so the player places their next spawn
+// themselves. See `resetExpiredRuns` below. A run is timed from its landing until it is handed over
+// or superseded, whether or not the room is still held, so an abandoned base is picked up by the
+// next round instead of being left spent.
 
 /** The tick offsets recorded after a landing, e.g. `[ 20000, 40000 ]`. Empty records nothing. */
 export function raceBrackets(): readonly number[] {
@@ -66,13 +67,6 @@ export const playerBracketsKey = (userId: string) => `speedrun/brackets/${userId
 export const runIdOf = (userId: string, run: number) => `${userId}:${run}`;
 /** `<userId>:<run>:<bracket>` — what sits in the schedule. A player id contains no `:`. */
 const dueMemberOf = (userId: string, run: number, bracket: number) => `${runIdOf(userId, run)}:${bracket}`;
-
-/** Where the spawn of a run was placed, so a restart lands the player on the same tile. */
-export interface SpawnSite {
-	name: string;
-	x: number;
-	y: number;
-}
 
 /** The `userId` and run number behind a `<userId>:<run>` id. */
 function parseRunId(runId: string) {
@@ -114,16 +108,9 @@ export function controlPointsOf(level: number, progress: number) {
  * A player landed in a room: start a new run at `time` and put every bracket in the schedule. Run
  * numbers only ever count up, which is what keeps the results of an earlier run readable (and lets a
  * stale schedule entry recognize that it has been superseded). The run is also put on the live board,
- * replacing whatever entry the player had there, and the tile they landed on is remembered so a
- * restart can put them back on it.
+ * replacing whatever entry the player had there.
  */
-export async function startRun(
-	shard: Shard,
-	userId: string,
-	roomName: string,
-	time: number,
-	spawn: SpawnSite,
-): Promise<number | undefined> {
+export async function startRun(shard: Shard, userId: string, roomName: string, time: number): Promise<number | undefined> {
 	const brackets = raceBrackets();
 	if (brackets.length === 0) {
 		return undefined;
@@ -134,12 +121,9 @@ export async function startRun(
 		shard.db.data.hSet(runKey(userId), 'run', String(run)),
 		shard.db.data.hSet(runKey(userId), 'room', roomName),
 		shard.db.data.hSet(runKey(userId), 'startedTick', String(time)),
-		shard.db.data.hSet(runKey(userId), 'spawnName', spawn.name),
-		shard.db.data.hSet(runKey(userId), 'spawnX', String(spawn.x)),
-		shard.db.data.hSet(runKey(userId), 'spawnY', String(spawn.y)),
-		// Landing here clears the end-of-run marks of the run this one replaces: one which has
-		// already been restarted is not restarted again.
-		shard.db.data.hDel(runKey(userId), [ 'endedTick', 'placedTick' ]),
+		// Landing here clears the end-of-run mark of the run this one replaces: a run which has
+		// already been handed over is not handed over again.
+		shard.db.data.hDel(runKey(userId), [ 'endedTick' ]),
 		...brackets.map(bracket =>
 			shard.data.zAdd(dueRunsKey, [ [ time + bracket, dueMemberOf(userId, run, bracket) ] ])),
 		// The run this one replaces is off the live board the moment a new one starts.
@@ -248,16 +232,15 @@ export async function captureDueBrackets(shard: Shard, time: number) {
 }
 
 /**
- * Restart every run whose landing has reached the end of its window. The player is handed over the
- * way a respawn hands them over — every room they are present in gets the engine's `unspawn`, which
- * takes their objects and releases the controllers — and `placeSpawn` puts them back down where they
- * landed, on the tile they landed on, which opens their next run.
+ * Restart every run whose landing has reached the end of its window: the player is handed over the
+ * way a respawn hands them over -- every room they are present in gets the engine's `unspawn`, which
+ * takes their objects and releases the controllers -- and that is all. No spawn is put back down;
+ * the next landing, which is the player placing one themselves, opens their next run.
  *
- * The two steps are a tick apart on purpose: `placeSpawn` is processed before `unspawn` when both
- * are queued for the same tick, so a spawn placed next to the handover would be taken out by it. The
- * run records the tick its handover was queued on (`endedTick`), which is what stops a second one,
- * and a landing clears it — whether that landing comes from the tile put back down or from the
- * player placing a spawn somewhere else themselves.
+ * The handover is queued as an intent for the next tick, so the work happens in the room processor
+ * like any other respawn. The run records the tick it was queued on (`endedTick`), which is what
+ * keeps a second handover from taking out whatever the player has put down since, and a landing
+ * clears it.
  */
 export async function resetExpiredRuns(shard: Shard, time: number) {
 	const after = respawnAfter();
@@ -277,9 +260,8 @@ export async function resetExpiredRuns(shard: Shard, time: number) {
 	}));
 }
 
-/** How often the tile is put back down again while a restart is unfinished, and when to stop. */
-const resetRetryAfter = 20;
-const resetGiveUpAfter = 100;
+/** How long a handed-over run is watched for its next landing before it is left alone. */
+const resetGiveUpAfter = 500;
 
 async function resetRun(shard: Shard, runId: string, time: number) {
 	const { run, userId } = parseRunId(runId);
@@ -288,14 +270,14 @@ async function resetRun(shard: Shard, runId: string, time: number) {
 		shard.db.data.hGet(User.infoKey(userId), 'username'),
 	]);
 	if (Number(info.run ?? 0) !== run || username === null) {
-		// A later landing took over, or the account is gone: there is nobody to restart.
+		// A later landing took over, or the account is gone: there is nobody to hand over.
 		await shard.data.zRem(racingKey, [ runId ]);
 		return;
 	}
 	const endedTick = info.endedTick === undefined ? undefined : Number(info.endedTick);
 	if (endedTick === undefined) {
-		// The handover is queued once, against every room the player is present in, and the mark
-		// goes with it.
+		// The handover is queued once, against every room the player is present in, and the mark goes
+		// with it.
 		const rooms = await shard.scratch.sMembers(userToPresenceRoomsSetKey(userId));
 		await Promise.all([
 			shard.db.data.hSet(runKey(userId), 'endedTick', String(time)),
@@ -307,35 +289,11 @@ async function resetRun(shard: Shard, runId: string, time: number) {
 		return;
 	}
 	if (time - endedTick > resetGiveUpAfter) {
-		// The room was taken, or the tile is built over. The player can still place a spawn of
-		// their own; the run is left marked, and nothing further is queued for it.
-		return;
+		// Still no landing: the player has walked away, or is taking their time. Nothing is waiting
+		// on the clock -- their next run starts from the landing, not from here -- so the entry is
+		// dropped rather than read every tick for the rest of the shard's life.
+		await shard.data.zRem(racingKey, [ runId ]);
 	}
-	const { room: roomName, spawnName, spawnX, spawnY } = info;
-	if (roomName === undefined || spawnName === undefined || spawnX === undefined || spawnY === undefined) {
-		// A run from before the tile was recorded. There is no tile to guess, and a wrong one would
-		// throw in the handover, so the restart stops here with the player unspawned.
-		return;
-	}
-	const placedTick = info.placedTick === undefined ? undefined : Number(info.placedTick);
-	if (placedTick !== undefined && time - placedTick < resetRetryAfter) {
-		// A placement which failed because the room was taken will not go through a tick later, so
-		// the tile is only offered again every `resetRetryAfter` ticks.
-		return;
-	}
-	// Wait for the rooms to be clear before handing the tile back: `placeSpawn` only sets a room up
-	// while it is nobody's.
-	const rooms = await shard.scratch.sMembers(userToPresenceRoomsSetKey(userId));
-	if (rooms.length !== 0) {
-		return;
-	}
-	await Promise.all([
-		shard.db.data.hSet(runKey(userId), 'placedTick', String(time)),
-		pushIntentsForRoomNextTick(shard, roomName, userId, {
-			local: { placeSpawn: [ [ Number(spawnX), Number(spawnY), spawnName ] ] },
-			internal: true,
-		}),
-	]);
 }
 
 /** A recorded result, as the pages render it. */

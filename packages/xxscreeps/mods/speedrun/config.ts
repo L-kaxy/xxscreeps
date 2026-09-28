@@ -76,17 +76,17 @@ export interface SpeedrunSettings {
 	raceBrackets?: number[];
 
 	/**
-	 * How many ticks a run lasts before the server restarts the player, in game ticks. A landing
-	 * starts the clock; when it runs out the player is handed over like a respawn -- every object
-	 * they own is taken out of their rooms, the controllers are released, and a spawn is put back
-	 * down where they landed, on the tile they landed on. That landing starts the next run, so runs
-	 * follow each other on a fixed cadence and a player who walks away is picked up by the next one.
+	 * How many ticks a run lasts before the server respawns the player, in game ticks. A landing
+	 * starts the clock; when it runs out the player is handed over exactly as if they had clicked
+	 * respawn: every object they own is taken out of their rooms and the controllers are released.
+	 * No spawn is placed for them -- they land again, and pick a room, themselves -- so the next run
+	 * starts from that landing rather than from this handover.
 	 *
 	 * The clock is tick-based, like the brackets, and it is only ever counted from a landing: a
 	 * player who lands again before the window is out drops the previous run and starts a new one,
-	 * and a player whose run was already restarted is not restarted twice. The default is the last
-	 * bracket, so the restart happens once the last result is in. Leave this key out to follow
-	 * `raceBrackets`, or set it to `0` (or less) to leave restarts to the player.
+	 * and a player who has already been handed over is not handed over twice. The default is the last
+	 * bracket, so the handover happens once the last result is in. Leave this key out to follow
+	 * `raceBrackets`, or set it to `0` (or less) to leave respawns to the player.
 	 * @default 40000
 	 */
 	respawnAfter?: number;
