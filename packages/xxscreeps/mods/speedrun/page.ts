@@ -153,8 +153,11 @@ var when = function(milliseconds) {
 	return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
 		' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
 };
-var duration = function(ticks) {
-	var minutes = Math.round(ticks / 60);
+// Wall time from a tick count: a tick is not a second. The shard runs at game.tickSpeed milliseconds
+// per tick, which the endpoint hands over, so the Running column is how long the player has actually
+// been at it -- the countdowns beside it stay in ticks, which is the clock the race is run on.
+var duration = function(ticks, tickSpeed) {
+	var minutes = Math.round(ticks * (tickSpeed || 1000) / 60000);
 	if (minutes < 90) { return minutes + ' min'; }
 	return round(minutes / 60, 1) + ' h';
 };
@@ -243,7 +246,7 @@ function renderLive(page) {
 			'<td class="num">RCL ' + entry.level + '</td>' +
 			'<td class="nowrap">' + progressBar(entry.level, entry.progress, entry.progressTotal) + '</td>' +
 			'<td class="num score">' + escape(entry.score) + '</td>' +
-			'<td class="muted">' + escape(duration(entry.elapsed)) + '</td>' +
+			'<td class="muted">' + escape(duration(entry.elapsed, page.tickSpeed)) + '</td>' +
 			'<td>' + brackets + '</td>' +
 			'</tr>';
 	}).join('');

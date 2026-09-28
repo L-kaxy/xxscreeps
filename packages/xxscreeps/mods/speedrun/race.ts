@@ -443,9 +443,13 @@ export async function readRacing(shard: Shard, time: number) {
 			stale.push(runId);
 			return undefined;
 		}
-		// Room initialization is skipped: this is a read, and it must not queue anything. The room is
-		// read at `time` rather than at whatever tick the caller's shard last saw.
-		const room = await shard.loadRoom(roomName, time, true).catch(() => undefined);
+		// The room is read at `time` rather than at whatever tick the caller's shard last saw, and it
+		// is read *initialized*: `controller` is a typed accessor, and a room which was never
+		// initialized has none -- which is how a run reads as `RCL 0` while the room it is played in
+		// is held at RCL 4. Nothing read here is saved, so the initialize pass costs a read and
+		// changes nothing. The level falls back to the room's own field, which is what the controller
+		// mod's own read paths use (`mods/classic/controller/backend.ts:52-55`).
+		const room = await shard.loadRoom(roomName, time).catch(() => undefined);
 		const controller = room?.controller;
 		// The owner of the room, as the controller mod keeps it: a string once the controller has been
 		// claimed or reserved, `null` while it is still free, and absent when the room has none at all.
@@ -459,7 +463,7 @@ export async function readRacing(shard: Shard, time: number) {
 			// the clock and is restarted at the end of it, so it is left where it is.
 			return undefined;
 		}
-		const level = controller?.level ?? 0;
+		const level = controller?.level ?? room?.['#level'] ?? 0;
 		const progress = controller?.progress ?? 0;
 		return {
 			brackets: raceBrackets().map(bracket => ({

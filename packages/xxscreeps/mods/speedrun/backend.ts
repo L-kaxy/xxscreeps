@@ -2,6 +2,7 @@ import type { JSONSchemaType } from 'ajv';
 import type { Database } from 'xxscreeps/engine/db/index.js';
 import { hooks, makeValidatedQueryRoute } from 'xxscreeps/backend/index.js';
 import * as User from 'xxscreeps/engine/db/user/index.js';
+import { tickSpeed } from 'xxscreeps/engine/service/tick.js';
 import { Fn } from 'xxscreeps/functional/fn.js';
 import { speedrunPage } from './page.js';
 import { raceBrackets, readLeaderboard, readPlayerBrackets, readPlayerRecords, readRacing } from './race.js';
@@ -121,13 +122,16 @@ hooks.register('route', {
 
 	execute: async context => {
 		// The tick is read rather than taken from the backend's cached one, since the rooms the board
-		// reads are read at it.
+		// reads are read at it. `tickSpeed` rides along because the board shows a run's wall time next
+		// to its tick countdowns, and a tick is not a second: the shard's clock is `game.tickSpeed`
+		// milliseconds per tick (`config/config.ts:336`, 250ms by default).
 		const stored = await context.shard.data.get('time');
 		const time = stored === null ? context.shard.time : Number(stored);
 		const list = await readRacing(context.shard, time);
 		return {
 			ok: 1,
 			brackets: raceBrackets(),
+			tickSpeed,
 			time,
 			list,
 			users: await usersOf(context.db, list.map(entry => entry.user)),
