@@ -27,7 +27,10 @@ import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
 import { initializationDefaults } from './config.js';
 import { sandboxRules } from './game.js';
-import { dueRunsKey, rankKey, runKey, scoreKey, startRun } from './race.js';
+import {
+	bestKey, dueRunsKey, playerBracketsKey, playerRunsKey, racingKey, rankKey, readLeaderboard,
+	readPlayerBrackets, readPlayerRecords, readRacing, runKey, scoreKey, startRun,
+} from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
 import { isSolid, wallSectorCores } from './walls.js';
 
@@ -686,6 +689,192 @@ describe('race results', () => {
 		await tick();
 		assert.deepStrictEqual(await shard.db.data.hGetAll(runKey('100')), {}, 'no run was started');
 		assert.strictEqual(await shard.data.zCard(dueRunsKey), 0);
+	}));
+});
+
+// The three pages a race board is built from: a bracket's list, one player's records, and the runs
+// still in progress. Two rooms held at different levels give the list something to order -- `W3N3` at
+// RCL 3 with 1000 progress (46200 control points) and `W4N3` at RCL 4 (180200) -- and one below the
+// entry bar, since a run which has not reached RCL 2 is still a run.
+describe('race pages', () => {
+	const twoRacers = simulate({
+		W3N3: room => {
+			room['#level'] = 3;
+			room['#user'] = room.controller!['#user'] = '100';
+			room.controller!['#progress'] = 1000;
+			room.controller!['#downgradeTime'] = 100000;
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W3N3'), [ C.MOVE ], 'dummy', '100'));
+		},
+		W4N3: room => {
+			room['#level'] = 4;
+			room['#user'] = room.controller!['#user'] = '101';
+			room.controller!['#downgradeTime'] = 100000;
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W4N3'), [ C.MOVE ], 'dummy', '101'));
+		},
+	});
+	const belowBar = simulate({
+		W3N3: room => {
+			room['#level'] = 1;
+			room['#user'] = room.controller!['#user'] = '100';
+			room.controller!['#progress'] = 50;
+			room.controller!['#downgradeTime'] = 100000;
+			room['#insertObject'](createCreep(new RoomPosition(25, 25, 'W3N3'), [ C.MOVE ], 'dummy', '100'));
+		},
+	});
+
+	/** Land one player in a room at the current tick. */
+	async function landIn(shard: Shard, userId: string, roomName: string) {
+		await startRun(shard, userId, roomName, shard.time);
+	}
+
+	test('the list holds one row per player, their best first', () => twoRacers(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await player('101', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await landIn(shard, '100', 'W3N3');
+		await landIn(shard, '101', 'W4N3');
+		await tick(3);
+		const page = await readLeaderboard(shard, 2, 0, 10);
+		assert.strictEqual(page.count, 2, 'both players are on the board');
+		assert.deepStrictEqual(
+			page.list.map(entry => [ entry.rank, entry.user, entry.score ]),
+			[ [ 0, '101', 180200 ], [ 1, '100', 46200 ] ],
+			'ordered by control points, ranked from zero',
+		);
+		assert.strictEqual(page.list[0]?.record?.level, 4);
+		assert.strictEqual(page.list[0]?.record?.room, 'W4N3');
+		assert.strictEqual(page.list[0]?.record?.run, 1);
+		assert.ok((page.list[0]?.record?.at ?? 0) > 0, 'the row carries when it was recorded');
+		assert.strictEqual(page.list[0]?.record?.elapsed, 2, 'and how long the run had been going');
+		assert.deepStrictEqual(
+			await readPlayerBrackets(shard, '100'),
+			[ { bracket: 2, score: 46200 } ],
+			'the brackets a player holds come back with their best',
+		);
+		assert.strictEqual(await shard.db.data.zCard(bestKey(2)), 2, 'and the board is one entry per player');
+	}));
+
+	test('a worse run adds a record without replacing the best', () => twoRacers(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await landIn(shard, '100', 'W4N3');
+		await tick(3);
+		await landIn(shard, '100', 'W3N3');
+		await tick(3);
+		assert.deepStrictEqual(
+			await shard.db.data.zRangeWithScores(bestKey(2), 0, 10, { by: 'SCORE' }),
+			[ [ 180200, '100' ] ],
+			'the board still holds the better run',
+		);
+		assert.deepStrictEqual(await shard.db.data.hGetAll(playerBracketsKey('100')), { '2': '180200' });
+		assert.strictEqual(await shard.db.data.zCard(playerRunsKey(2, '100')), 2, 'both runs are on file');
+		const page = await readLeaderboard(shard, 2, 0, 10);
+		assert.deepStrictEqual(
+			page.list.map(entry => [ entry.user, entry.score, entry.record?.room ]),
+			[ [ '100', 180200, 'W4N3' ] ],
+		);
+	}));
+
+	test('the records of a player come back best first, with their standing', () => twoRacers(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await landIn(shard, '100', 'W3N3');
+		await tick(3);
+		await landIn(shard, '100', 'W4N3');
+		await tick(3);
+		const records = await readPlayerRecords(shard, '100', [ 2 ]);
+		assert.deepStrictEqual(
+			records.map(entry => [ entry.record.room, entry.score, entry.rank, entry.record.run ]),
+			[ [ 'W4N3', 180200, 0, 2 ], [ 'W3N3', 46200, 1, 1 ] ],
+			'every run, best first, each with the place it took',
+		);
+		assert.deepStrictEqual(
+			await readPlayerRecords(shard, '100', []),
+			[],
+			'and nothing is read for a bracket which was not asked for',
+		);
+	}));
+
+	test('the live board reads the rooms of the runs in progress', () => twoRacers(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 20000, 40000 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		const started = shard.time;
+		await landIn(shard, '100', 'W3N3');
+		const list = await readRacing(shard, shard.time);
+		assert.deepStrictEqual(
+			list.map(entry => [
+				entry.user, entry.room, entry.run, entry.level, entry.progress, entry.score,
+				entry.startedTick, entry.elapsed,
+			]),
+			[ [ '100', 'W3N3', 1, 3, 1000, 46200, started, 0 ] ],
+			'the level is the one in the room right now',
+		);
+		assert.deepStrictEqual(list[0]?.brackets, [
+			{ bracket: 20000, dueTick: started + 20000, left: 20000 },
+			{ bracket: 40000, dueTick: started + 40000, left: 40000 },
+		]);
+	}));
+
+	test('a run below RCL 2 stays on the live board, with nothing recorded', () => belowBar(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2, 4 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await landIn(shard, '100', 'W3N3');
+		await tick(3);
+		assert.deepStrictEqual(await shard.db.data.hGetAll(scoreKey(2, '100:1')), {}, 'nothing was recorded');
+		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 0);
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'and the run is still on');
+		assert.deepStrictEqual(
+			(await readRacing(shard, shard.time)).map(entry => [ entry.user, entry.level, entry.score ]),
+			[ [ '100', 1, 50 ] ],
+		);
+	}));
+
+	test('a room which is no longer theirs drops off the live board', () => twoRacers(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		// `W4N3` is 101's room, so the run is on the board but the room is not the player's.
+		await landIn(shard, '100', 'W4N3');
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'the landing put the run on the board');
+		assert.deepStrictEqual(await readRacing(shard, shard.time), [], 'but the room is not theirs');
+		assert.strictEqual(await shard.data.zCard(racingKey), 0, 'so the entry is dropped as it is read');
+	}));
+
+	test('the last bracket takes the run off the live board', () => twoRacers(async ({ shard, player, tick }) => {
+		using brackets = withRaceBrackets([ 2, 4 ]);
+		await player('100', Game => {
+			Game.creeps.dummy?.move(C.TOP);
+		});
+		await tick();
+		await landIn(shard, '100', 'W3N3');
+		await tick(3);
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'still racing until the last bracket');
+		await tick(2);
+		assert.strictEqual(await shard.data.zCard(racingKey), 0, 'and off the board once both are in');
+		assert.deepStrictEqual(
+			await readPlayerBrackets(shard, '100'),
+			[ { bracket: 2, score: 46200 }, { bracket: 4, score: 46200 } ],
+		);
+		assert.deepStrictEqual(await shard.db.data.zRangeWithScores(bestKey(4), 0, 10, { by: 'SCORE' }), [ [ 46200, '100' ] ]);
 	}));
 });
 
