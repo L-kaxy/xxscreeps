@@ -10,9 +10,9 @@
                     "default": false
                 },
                 "closeCenterNine": {
-                    "description": "Whether the sector cores (each sector's center room plus its eight neighbours, the central 3x3) are closed on every service start. Closing drops the room from the world's open-room list, which Game.map.getRoomStatus() reports as `closed`; nothing inside the room is deleted and no other room is touched. The rooms are read from the world's own sector records.",
+                    "description": "Whether the sector cores (each sector's center room plus its eight neighbours, the central 3x3) are closed on every service start. On by default. Closing drops the room from the world's open-room list, which Game.map.getRoomStatus() reports as `closed`; nothing inside the room is deleted and no other room is touched. The rooms are read from the world's own sector records. Set to false on a shard which wants its cores playable.",
                     "type": "boolean",
-                    "default": false
+                    "default": true
                 }
             },
             "type": "object"

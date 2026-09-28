@@ -4,6 +4,7 @@ import { create as createCreep } from 'xxscreeps/mods/classic/creep/creep.js';
 import { computeRoomMeta, roomType } from 'xxscreeps/mods/modern/sector/terrain.js';
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
+import { initializationDefaults } from './config.js';
 import { roomsToClose } from './rooms.js';
 
 // `W7N7` has exits in all four directions and all of them lead to uncontrolled rooms — the same
@@ -64,6 +65,14 @@ describe('mods/speedrun', () => {
 	});
 
 	describe('sector-core closure', () => {
+		test('the ruleset ships with the cores closed', () => {
+			assert.strictEqual(
+				initializationDefaults.speedrun.closeCenterNine,
+				true,
+				'an operator opts out with `closeCenterNine: false`',
+			);
+		});
+
 		// A 2x2 block of sectors: `W10N10` rings all four centers, exactly the fixture
 		// `mods/modern/sector` asserts its own room meta against.
 		const quadrant = new Set<string>([ ...function*() {

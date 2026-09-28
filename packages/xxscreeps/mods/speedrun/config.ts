@@ -13,8 +13,8 @@ export interface SpeedrunSettings {
 	 * open-room list, which is what `Game.map.getRoomStatus()` reports as `{ status: 'closed' }`;
 	 * nothing inside the room is read, moved or deleted, and no other room is touched. The rooms are
 	 * taken from the world's own sector records, so a world with more than one sector is covered
-	 * without any further configuration.
-	 * @default false
+	 * without any further configuration. Set it to `false` on a shard which wants its cores playable.
+	 * @default true
 	 */
 	closeCenterNine?: boolean;
 }
@@ -37,6 +37,6 @@ declare module 'xxscreeps/config/config.js' {
 export const initializationDefaults = {
 	speedrun: {
 		invaders: false,
-		closeCenterNine: false,
+		closeCenterNine: true,
 	},
 } satisfies SpeedrunConfig;
