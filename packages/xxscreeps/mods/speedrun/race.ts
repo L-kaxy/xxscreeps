@@ -2,6 +2,8 @@ import type { Shard } from 'xxscreeps/engine/db/shard.js';
 import { config } from 'xxscreeps/config/index.js';
 import * as User from 'xxscreeps/engine/db/user/index.js';
 import { pushIntentsForRoomNextTick, userToPresenceRoomsSetKey } from 'xxscreeps/engine/processor/model.js';
+import { controlledRoomsKey } from 'xxscreeps/mods/classic/controller/model.js';
+import { saveUserFlagBlobForNextTick } from 'xxscreeps/mods/meta/flag/model.js';
 import * as C from 'xxscreeps:mods/constants';
 
 // Racing results: how far a player's room had come a fixed number of ticks after they landed in it.
@@ -276,19 +278,34 @@ async function resetRun(shard: Shard, runId: string, time: number) {
 	}
 	const endedTick = info.endedTick === undefined ? undefined : Number(info.endedTick);
 	if (endedTick === undefined) {
-		// The handover is queued once, against every room the player is present in, and the mark goes
-		// with it.
-		const rooms = await shard.scratch.sMembers(userToPresenceRoomsSetKey(userId));
-		await Promise.all([
-			shard.db.data.hSet(runKey(userId), 'endedTick', String(time)),
-			...rooms.map(roomName => pushIntentsForRoomNextTick(shard, roomName, userId, {
-				local: { unspawn: [ [] ] },
-				internal: true,
-			})),
-		]);
-		return;
+		// The handover is marked with the tick it started on, which is what the give-up window below
+		// is measured from.
+		await shard.db.data.hSet(runKey(userId), 'endedTick', String(time));
 	}
-	if (time - endedTick > resetGiveUpAfter) {
+	// The handover goes out on every tick of the window rather than once, because the first one can
+	// miss: the presence set lives in scratch and is empty for a player who is not around, and a
+	// handover nobody performs is invisible from the outside -- the run reads as restarted while the
+	// player is still playing it. Two safety nets go with that. The rooms the player controls are
+	// handed over beside the rooms they are present in, and the room the run started in is always
+	// named, so there is a target even when both sets are empty. Queuing an intent also wakes the
+	// room it is for, and `unspawn` ignores a room which holds nothing of theirs, so a repeat costs
+	// two reads and a no-op.
+	const [ presence, controlled ] = await Promise.all([
+		shard.scratch.sMembers(userToPresenceRoomsSetKey(userId)),
+		shard.scratch.sMembers(controlledRoomsKey(userId)),
+	]);
+	const rooms = [ ...new Set([ ...presence, ...controlled, info.room ]) ]
+		.filter((roomName): roomName is string => roomName !== undefined);
+	await Promise.all([
+		...rooms.map(roomName => pushIntentsForRoomNextTick(shard, roomName, userId, {
+			local: { unspawn: [ [] ] },
+			internal: true,
+		})),
+		// The respawn route clears the player's flags along with the handover
+		// (`mods/classic/spawn/backend.ts:200`); a restart leaves nothing behind, so it does too.
+		saveUserFlagBlobForNextTick(shard, userId, undefined),
+	]);
+	if (time - (endedTick ?? time) > resetGiveUpAfter) {
 		// Still no landing: the player has walked away, or is taking their time. Nothing is waiting
 		// on the clock -- their next run starts from the landing, not from here -- so the entry is
 		// dropped rather than read every tick for the rest of the shard's life.
