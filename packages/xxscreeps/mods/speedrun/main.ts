@@ -2,7 +2,7 @@ import { config } from 'xxscreeps/config/index.js';
 import { registerShardInitializer, registerShardTickProcessor } from 'xxscreeps/engine/processor/index.js';
 import { schema as worldSchema } from 'xxscreeps/game/map.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
-import { captureDueBrackets, raceBrackets } from './race.js';
+import { captureDueBrackets, raceBrackets, resetExpiredRuns } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
 import { isSolid, wallSectorCores } from './walls.js';
 
@@ -72,8 +72,14 @@ registerShardInitializer(async shard => {
 // land at the right tick whether or not the player is online: the room blob is read straight out of
 // storage, and a room which went to sleep keeps the state it had. The schedule lives in `shard.data`
 // rather than scratch because it has to survive across ticks -- see `race.ts` for the tables written.
+//
+// The runs at the end of their window are restarted from the same place, so a restart does not depend
+// on the player being around either: their rooms are handed over and a spawn is put back down where
+// they landed. Each restart is queued as an intent for the next tick, so the work itself happens in
+// the room processor like any other handover.
 registerShardTickProcessor(async (shard, time) => {
 	if (raceBrackets().length !== 0) {
 		await captureDueBrackets(shard, time);
+		await resetExpiredRuns(shard, time);
 	}
 });
