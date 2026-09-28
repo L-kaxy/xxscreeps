@@ -61,6 +61,21 @@ export interface SpeedrunSettings {
 	respawnCleanup?: boolean;
 
 	/**
+	 * The tick offsets after a landing which are recorded as race results, in game ticks. Each bracket
+	 * stores one row per run -- RCL level, progress and control points, plus the account's GCL at that
+	 * tick -- and puts the run in a ranked set, which is what a leaderboard page reads. The offsets are
+	 * ticks rather than wall-clock times, so a shard which is paused or down freezes a race instead of
+	 * voiding it.
+	 *
+	 * A result only lands while the player still holds the room and its controller is RCL 2 or above.
+	 * A run which a later landing supersedes, or whose room is lost to `unclaim`, a downgrade to zero
+	 * or a respawn, simply stops scoring; earlier brackets of that run keep the results they already
+	 * recorded. An empty list records nothing at all.
+	 * @default [ 20000, 40000 ]
+	 */
+	raceBrackets?: number[];
+
+	/**
 	 * Whether creeps may claim neutral controllers. With this off `Creep.claimController` returns
 	 * `ERR_INVALID_TARGET` before it records an intent, so no room in the world can change hands.
 	 * Nothing else about controllers changes: `reserveController`, `attackController` and
@@ -124,6 +139,7 @@ export const initializationDefaults = {
 		powerBanks: false,
 		ruins: false,
 		respawnCleanup: true,
+		raceBrackets: [ 20000, 40000 ],
 		claimController: false,
 		closeCenterNine: true,
 		wallSectorCores: true,

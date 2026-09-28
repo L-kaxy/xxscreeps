@@ -1,8 +1,12 @@
+import type { ProcessorContext } from 'xxscreeps/engine/processor/room.js';
 import type { RoomObject } from 'xxscreeps/game/object.js';
 import { config } from 'xxscreeps/config/index.js';
 import { registerIntentProcessor, registerRoomTickProcessor } from 'xxscreeps/engine/processor/index.js';
+import { intentProcessors } from 'xxscreeps/engine/processor/symbols.js';
+import { Game, me } from 'xxscreeps/game/index.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { Ruin } from 'xxscreeps/mods/classic/structure/ruin.js';
+import { raceBrackets, startRun } from './race.js';
 // The respawn rule chains the engine's `unspawn` handler instead of adding a registration of its
 // own, so it lives in a module of its own. See `respawn.ts`.
 import './respawn.js';
@@ -74,3 +78,22 @@ Room.prototype['#insertObject'] = function(insertObject) {
 		}
 	};
 }(Room.prototype['#insertObject']);
+
+// The race starts when a room is handed to a player: `placeSpawn` is the intent both a first landing
+// and a respawn go through, so it is chained rather than shadowed -- the same shape `respawn.ts` uses
+// for `unspawn`, and for the same reason: the room stage only calls the first registration whose
+// receiver matches, so a second `placeSpawn` would replace the handover instead of following it.
+//
+// The write is queued as a task because an intent handler cannot await; the room processor flushes
+// its tasks before the room is saved. `Game.time` is the tick the landing happened on, which is what
+// the brackets in `race.ts` are counted from.
+const placeSpawn = intentProcessors.find(info => info.intent === 'placeSpawn' && info.receiver === Room);
+if (placeSpawn) {
+	const handover = placeSpawn.process;
+	placeSpawn.process = (room: Room, context: ProcessorContext, ...data: unknown[]) => {
+		handover(room, context, ...data);
+		if (raceBrackets().length !== 0) {
+			context.task(startRun(context.shard, me, room.name, Game.time));
+		}
+	};
+}

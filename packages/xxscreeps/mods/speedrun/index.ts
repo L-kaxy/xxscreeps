@@ -38,6 +38,13 @@ import * as types from 'xxscreeps/tsroot.js';
 //      the unowned ones carry no owner and simply stay. See `respawn.ts` for the mechanism (it
 //      chains the engine's `unspawn` handler) and the guards on the rooms it applies to.
 //
+//    - `raceBrackets` (default `[ 20000, 40000 ]`): the tick offsets after a landing which are
+//      recorded as race results. `processor.ts` chains `placeSpawn` to start a run and schedule the
+//      brackets, and `main.ts` drains the schedule from the shard tick processor, so a result lands
+//      whether or not the player is online. `race.ts` owns the two tables (`speedrun/run`,
+//      `speedrun/score`) and the ranked set a list page reads; a run only scores while its room is
+//      still held at RCL 2 or above.
+//
 //    - `claimController` (default `false`): `Creep.claimController` is refused before it records an
 //      intent, so players cannot take a room. `reserveController`, `attackController` and
 //      `upgradeController` are untouched, and the starting room a new player is handed goes through
