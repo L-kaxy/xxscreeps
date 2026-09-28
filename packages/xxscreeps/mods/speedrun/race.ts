@@ -428,7 +428,8 @@ export interface RacingEntry {
 /**
  * The runs in progress, current to the tick: each one is read out of its room rather than out of a
  * stored result, since a run which has not reached a bracket has nothing else recorded. An entry
- * whose run was superseded or whose room is gone is dropped from the board as it is read.
+ * whose run was superseded is dropped from the board as it is read; one of a room which belongs to
+ * somebody else is hidden, but kept, so the restart at the end of the window still finds it.
  */
 export async function readRacing(shard: Shard, time: number) {
 	const racing = await shard.data.zRangeWithScores(racingKey, -Infinity, Infinity, { by: 'SCORE' });
@@ -446,14 +447,20 @@ export async function readRacing(shard: Shard, time: number) {
 		// read at `time` rather than at whatever tick the caller's shard last saw.
 		const room = await shard.loadRoom(roomName, time, true).catch(() => undefined);
 		const controller = room?.controller;
-		if (room === undefined || controller === undefined
-			|| controller['#user'] !== userId || room['#user'] !== userId) {
-			// The room is no longer theirs, so there is no progress to show. The run itself is still
-			// on the clock and is restarted at the end of it, so it is left where it is.
+		// The owner of the room, as the controller mod keeps it: a string once the controller has been
+		// claimed or reserved, `null` while it is still free, and absent when the room has none at all.
+		// Only a room which belongs to somebody else is one the run has lost -- a landing whose
+		// controller has not been claimed yet is a run at level zero, which is exactly what the first
+		// minutes of every race look like. A room which cannot be read is not evidence that it is gone
+		// either, so the entry is left on the board and read as level zero rather than disappearing.
+		const owner = controller?.['#user'] ?? room?.['#user'] ?? null;
+		if (owner !== null && owner !== userId) {
+			// Taken over by another player: there is no progress to show. The run itself is still on
+			// the clock and is restarted at the end of it, so it is left where it is.
 			return undefined;
 		}
-		const level = controller.level;
-		const progress = controller.progress ?? 0;
+		const level = controller?.level ?? 0;
+		const progress = controller?.progress ?? 0;
 		return {
 			brackets: raceBrackets().map(bracket => ({
 				bracket,
@@ -463,7 +470,7 @@ export async function readRacing(shard: Shard, time: number) {
 			elapsed: time - startedTick,
 			level,
 			progress,
-			progressTotal: controller.progressTotal ?? 0,
+			progressTotal: controller?.progressTotal ?? 0,
 			room: roomName,
 			run,
 			runId,

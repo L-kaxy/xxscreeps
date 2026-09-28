@@ -723,6 +723,16 @@ describe('race pages', () => {
 		},
 	});
 
+	// A landing whose controller nobody has claimed yet: the player is in the room, that is all. This
+	// is the first state of every run -- the level is zero until a creep reaches the controller.
+	const unclaimed = simulate({
+		W3N3: room => {
+			room['#level'] = 0;
+			room['#user'] = room.controller!['#user'] = null;
+			room.controller!['#progress'] = 0;
+		},
+	});
+
 	/** Land one player in a room at the current tick. */
 	async function landIn(shard: Shard, userId: string, roomName: string) {
 		await startRun(shard, userId, roomName, shard.time);
@@ -847,6 +857,17 @@ describe('race pages', () => {
 		);
 	}));
 
+	test('a landing whose controller is unclaimed stays on the live board', () => unclaimed(async ({ shard }) => {
+		using brackets = withRaceBrackets([ 2 ]);
+		await startRun(shard, '100', 'W3N3', shard.time);
+		assert.deepStrictEqual(
+			(await readRacing(shard, shard.time)).map(entry => [ entry.user, entry.room, entry.level, entry.score ]),
+			[ [ '100', 'W3N3', 0, 0 ] ],
+			'a controller nobody has claimed yet is not a lost room',
+		);
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'and the run is on the clock');
+	}));
+
 	test('a room which is no longer theirs drops off the live board', () => twoRacers(async ({ shard, player, tick }) => {
 		using brackets = withRaceBrackets([ 2 ]);
 		await player('100', Game => {
@@ -857,7 +878,7 @@ describe('race pages', () => {
 		await landIn(shard, '100', 'W4N3');
 		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'the landing put the run on the board');
 		assert.deepStrictEqual(await readRacing(shard, shard.time), [], 'but the room is not theirs');
-		assert.strictEqual(await shard.data.zCard(racingKey), 0, 'so the entry is dropped as it is read');
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'the row is hidden, not dropped: the restart still has to find it');
 	}));
 
 	test('the last bracket takes the run off the live board', () => twoRacers(async ({ shard, player, tick }) => {
