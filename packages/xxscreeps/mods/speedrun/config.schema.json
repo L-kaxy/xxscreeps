@@ -9,6 +9,16 @@
                     "type": "boolean",
                     "default": false
                 },
+                "deposits": {
+                    "description": "Whether the periodic deposit generator (mods/modern/deposit) runs. Off by default: the placement intent is dropped, so no new deposit is ever put down. Deposits already in the world keep being harvested and decay on schedule, and their decay no longer triggers a refill. Set to true for vanilla placement.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "powerBanks": {
+                    "description": "Whether the periodic power bank generator (mods/modern/powerbank) runs. Off by default: the placement intent is dropped, so no new bank is ever put down. Banks already in the world decay on schedule. Set to true for vanilla placement.",
+                    "type": "boolean",
+                    "default": false
+                },
                 "closeCenterNine": {
                     "description": "Whether the sector cores (each sector's center room plus its eight neighbours, the central 3x3) are closed on every service start. On by default. Closing drops the room from the world's open-room list, which Game.map.getRoomStatus() reports as `closed`; nothing inside the room is deleted and no other room is touched. The rooms are read from the world's own sector records. Set to false on a shard which wants its cores playable.",
                     "type": "boolean",

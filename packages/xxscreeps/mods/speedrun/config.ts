@@ -8,6 +8,25 @@ export interface SpeedrunSettings {
 	invaders?: boolean;
 
 	/**
+	 * Whether the periodic deposit generator (`mods/modern/deposit`) runs. With this off the
+	 * generator's placement intent is dropped, so no new deposit is ever put down: the evaluator
+	 * keeps walking the sector schedule and the intent keeps arriving, but nothing lands. Deposits
+	 * already in the world are untouched -- they keep their cooldown, keep being harvested and decay
+	 * on schedule, and their decay no longer triggers a refill. Set it to `true` to get vanilla
+	 * placement back.
+	 * @default false
+	 */
+	deposits?: boolean;
+
+	/**
+	 * Whether the periodic power bank generator (`mods/modern/powerbank`) runs. With this off the
+	 * generator's placement intent is dropped, so no new bank is ever put down; banks already in the
+	 * world are untouched and decay on schedule. Set it to `true` to get vanilla placement back.
+	 * @default false
+	 */
+	powerBanks?: boolean;
+
+	/**
 	 * Whether the sector cores -- each sector's center room plus its eight neighbours, i.e. the
 	 * central 3x3 -- are closed on every service start. Closing drops the room from the world's
 	 * open-room list, which is what `Game.map.getRoomStatus()` reports as `{ status: 'closed' }`;
@@ -56,6 +75,8 @@ declare module 'xxscreeps/config/config.js' {
 export const initializationDefaults = {
 	speedrun: {
 		invaders: false,
+		deposits: false,
+		powerBanks: false,
 		closeCenterNine: true,
 		wallSectorCores: true,
 	},
