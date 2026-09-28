@@ -45,7 +45,10 @@ import * as types from 'xxscreeps/tsroot.js';
 //      `speedrun/score`, `speedrun/rank`, `speedrun/best`, `speedrun/runs`, `speedrun/brackets`,
 //      plus the shard's `speedrun/due` and `speedrun/racing`); a run only scores while its room is
 //      still held at RCL 2 or above. `backend.ts` serves the three pages: a bracket's list (one row
-//      per player, their best), one player's records, and the runs still in progress.
+//      per player, their best), one player's records, and the runs still in progress -- and the board
+//      which reads them, `page.ts`, at `/speedrun`. The client is the official AngularJS bundle, so
+//      the board is ours and the client only carries the link: a `menuData` entry on `/api/version`
+//      opens it in its own tab.
 //
 //    - `respawnAfter` (default `40000`, i.e. the last bracket): how many ticks a run lasts before the
 //      server respawns the player on its own. When the window runs out, the rooms the player is
