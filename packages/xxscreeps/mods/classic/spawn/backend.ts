@@ -3,16 +3,16 @@ import type { AnyStructure } from 'xxscreeps/mods/classic/structure/structure.js
 import { bindRenderer, hooks, makeValidatedPayloadRoute } from 'xxscreeps/backend/index.js';
 import { config } from 'xxscreeps/config/index.js';
 import * as User from 'xxscreeps/engine/db/user/index.js';
-import { pushIntentsForRoomNextTick, userToIntentRoomsSetKey, userToPresenceRoomsSetKey } from 'xxscreeps/engine/processor/model.js';
+import { pushIntentsForRoomNextTick, userToIntentRoomsSetKey } from 'xxscreeps/engine/processor/model.js';
 import { Fn } from 'xxscreeps/functional/fn.js';
 import { Game, runOneShot } from 'xxscreeps/game/index.js';
 import { RoomPosition } from 'xxscreeps/game/position.js';
 import { ConstructionSite } from 'xxscreeps/mods/classic/construction/construction-site.js';
 import { checkCreateConstructionSite } from 'xxscreeps/mods/classic/construction/room.js';
 import { renderStore } from 'xxscreeps/mods/classic/resource/backend.js';
-import { saveUserFlagBlobForNextTick } from 'xxscreeps/mods/meta/flag/model.js';
 import * as C from 'xxscreeps:mods/constants';
 import { StructureExtension } from './extension.js';
+import { respawnPlayer } from './model.js';
 import * as Spawn from './spawn.js';
 
 bindRenderer(StructureExtension, (extension, next) => ({
@@ -189,15 +189,12 @@ hooks.register('route', {
 		if (userId == null) {
 			return;
 		}
-		const roomNames = await context.shard.scratch.sMembers(userToPresenceRoomsSetKey(userId));
-		if (roomNames.length === 0) {
+		// The handover is shared with anything else which restarts a player, so that a restart the
+		// server decides on does the same thing this button does (`./model.js`).
+		const rooms = await respawnPlayer(context.shard, userId);
+		if (rooms.length === 0) {
 			return { error: 'invalid status' };
 		}
-		await Promise.all(roomNames.map(roomName => pushIntentsForRoomNextTick(context.shard, roomName, userId, {
-			local: { unspawn: [ [] ] },
-			internal: true,
-		})));
-		await saveUserFlagBlobForNextTick(context.shard, userId, undefined);
 		return { ok: 1 };
 	},
 });
