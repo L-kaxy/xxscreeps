@@ -1,117 +1,98 @@
 import type { Shard } from 'xxscreeps/engine/db/shard.js';
-import type { TemplateSpec } from './template.js';
-import { config } from 'xxscreeps/config/index.js';
 import { schema as worldSchema } from 'xxscreeps/game/map.js';
 import { Source } from 'xxscreeps/mods/classic/source/source.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
 import { sectorCoreRooms } from './rooms.js';
 import {
-	applyUniform, coveredTerrain, generateTemplate, hasStandingRoom, isSwampType, isUniform, isWallType,
-	kMaxSwampType, kMaxTerrainType, uniformLayout,
+	applyUniform, coveredTerrain, generateTemplate, hasStandingRoom, isUniform, kMaxSwampType, kMaxTerrainType,
+	templateExitWidth, uniformLayout,
 } from './template.js';
 
 /**
- * One terrain for the whole interior.
+ * One terrain for the whole interior, as the `uniform-terrain` command runs it.
  *
- * Every room of every sector's 9x9 interior -- everything but the core, i.e. 72 rooms of the stock
- * world -- is overwritten with a single generated template, so no room is a better start than
- * another. The template is generated the way `generate-room` generates a room (see `template.ts` for
- * the layouts, the exits and the one repair it can make), applied once, and kept: the shard stores
- * the terrain and the layout it came from, so a restart, a rollback or a redeploy does not change
- * the world.
+ * Every room of every sector's 9x9 interior -- everything but the core, 72 rooms of the stock world
+ * -- is overwritten with one generated template, so no room is a better start than another. The
+ * template is `generate-room`'s own generator (`template.ts` has the layouts, the exits and the one
+ * repair it can make); what this module adds is the write: the terrain blob, once, with the world's
+ * terrain from before it put aside so `--restore` can lift the whole thing again.
  *
  * Terrain is the only thing written. No room blob is rewritten and no object is read, moved or
- * deleted, which is why the last thing this does is *report* the objects a wall landed next to: a
- * source with no plain ground beside it can never be mined, and only the operator can decide what to
- * do about that. Rooms around a core keep the face which looks at it sealed, exactly as
- * `wallSectorCores` leaves it, and the highway ring keeps its own terrain except for the eight tiles
- * of each face which looks at a covered room -- without those the outermost rooms would advertise an
- * exit the ring seals.
+ * deleted, which is why the objects a wall landed next to are *reported* rather than moved: a source
+ * with no plain ground beside it can never be mined, and only the operator can decide about that.
  */
 
-/** The layout a template was generated from, so a restart regenerates nothing. */
-interface StoredSpec extends TemplateSpec {
-	/** Bumped when the generator itself changes, which forces a fresh template. */
-	format: number;
+/** Where the terrain from before the first stamp is kept, the key `wallSectorCores` also uses. */
+export const backupKey = 'speedrun/terrainBackup';
+
+export interface UniformRequest {
+	/** Wall layout, 1-28; omitted rolls one, the way `generate-room` does. */
+	terrainType?: number;
+	/** Swamp layout, 0-14; omitted rolls one. 0 is no swamp. */
+	swampType?: number;
+	/** Width in tiles of the opening every side carries. Read back off a given template instead. */
+	exitWidth?: number;
+	/** A template to stamp instead of generating one: 625 packed bytes, the format the engine holds. */
+	template?: Readonly<Uint8Array>;
+	/** Whether the highway ring's inward faces are opened too. Default true. */
+	ringEdges?: boolean;
+	/** Whether the faces which look at a core are kept shut. Default true. */
+	sealCore?: boolean;
 }
 
-const kFormat = 1;
-const specKey = 'speedrun/uniformSpec';
-const templateKey = 'speedrun/uniformTerrain';
-const backupKey = 'speedrun/terrainBackup';
-const kDefaultExitWidth = 8;
-
-/** The exit width an operator gets without saying so: even, so the opening is centred. */
-function resolveExitWidth(value: unknown): number {
-	return typeof value === 'number' && Number.isInteger(value) && value >= 2 && value <= 46 && value % 2 === 0
-		? value
-		: kDefaultExitWidth;
+export interface UniformReport {
+	/** The terrain every covered room now holds, as the packed 625 bytes. */
+	terrain: Uint8Array;
+	terrainType: number;
+	swampType: number;
+	exitWidth: number;
+	/** False when a template was passed in rather than generated. */
+	generated: boolean;
+	/** Whether the layout had to be repaired to connect its four exits. */
+	repaired: boolean;
+	attempts: number;
+	covered: number;
+	ringFaces: number;
+	/** False for a dry run, and for a world which already held this template. */
+	written: boolean;
+	lostSources: number;
+	lostOthers: number;
+	/** Rooms where an object lost its footing, with the ones left without a source marked. */
+	flagged: string[];
 }
 
-/** The layout the operator asked for, rolling whatever they left out the way `generate-room` does. */
-function resolveSpec(): TemplateSpec {
-	const settings = config.speedrun;
-	return {
-		terrainType: isWallType(settings?.uniformTerrainType)
-			? settings.uniformTerrainType
-			: Math.floor(Math.random() * kMaxTerrainType) + 1,
-		swampType: isSwampType(settings?.uniformSwampType)
-			? settings.uniformSwampType
-			: Math.floor(Math.random() * kMaxSwampType),
-		exitWidth: resolveExitWidth(settings?.uniformExitWidth),
-	};
-}
-
-/**
- * Whether the stored layout is still the one being asked for. A key the operator left out matches
- * anything -- it is the stored value which holds its roll -- so an unset layout does not roll a new
- * template on every start.
- */
-function sameSpec(stored: StoredSpec, settings: NonNullable<typeof config.speedrun>): boolean {
-	return stored.format === kFormat &&
-		(settings.uniformTerrainType === undefined || settings.uniformTerrainType === stored.terrainType) &&
-		(settings.uniformSwampType === undefined || settings.uniformSwampType === stored.swampType) &&
-		resolveExitWidth(settings.uniformExitWidth) === stored.exitWidth;
-}
-
-/**
- * The template this shard uses: the one it already holds while the layout still matches, a freshly
- * generated one otherwise. A template is generated once and stored, so the world only changes when
- * the operator changes the layout.
- */
-async function loadTemplate(shard: Shard) {
-	const settings = config.speedrun ?? {};
-	const [ storedSpec, storedTemplate ] = await Promise.all([
-		shard.data.get(specKey),
-		shard.data.get(templateKey, { blob: true }),
-	]);
-	if (storedSpec !== null && storedTemplate !== null) {
-		try {
-			const parsed = JSON.parse(storedSpec) as StoredSpec;
-			if (sameSpec(parsed, settings)) {
-				return { spec: parsed, template: storedTemplate, generated: false };
-			}
-		} catch {}
+/** The template to stamp: the one passed in, or a fresh one from the request's layout. */
+export function buildTemplate(request: UniformRequest) {
+	if (request.template !== undefined) {
+		if (request.template.length !== 625) {
+			throw new Error(`a template is 625 packed bytes, not ${request.template.length}`);
+		}
+		return {
+			template: Uint8Array.from(request.template),
+			terrainType: request.terrainType ?? 0,
+			swampType: request.swampType ?? 0,
+			repaired: false,
+			attempts: 0,
+			generated: false,
+		};
 	}
-	const spec = resolveSpec();
-	const { terrain, repaired, attempts } = generateTemplate(spec);
-	await Promise.all([
-		shard.data.set(specKey, JSON.stringify({ ...spec, format: kFormat })),
-		shard.data.set(templateKey, terrain),
-	]);
-	return { spec, template: terrain, generated: true, repaired, attempts };
+	// Omitted layouts roll, the way `generate-room` rolls what is not passed to it.
+	const terrainType = request.terrainType ?? Math.floor(Math.random() * kMaxTerrainType) + 1;
+	const swampType = request.swampType ?? Math.floor(Math.random() * kMaxSwampType);
+	const { terrain, repaired, attempts } = generateTemplate({ terrainType, swampType, exitWidth: request.exitWidth ?? 8 });
+	return { template: terrain, repaired, attempts, terrainType, swampType, generated: true };
 }
 
 /**
  * Reports the objects a wall landed next to, per room. A room's sources read as usable when a creep
  * can stand beside them -- the tile an object occupies is not walkable either way, so only the ring
- * around it matters -- and the template is one open region, so any plain neighbour counts.
+ * around it matters -- and a covered room's plain tiles are one region, so any plain neighbour
+ * counts.
  */
 async function reportObjects(shard: Shard, names: readonly string[], template: Readonly<Uint8Array>, core: readonly string[]) {
 	const flagged: string[] = [];
 	let lostSources = 0;
 	let lostOthers = 0;
-	let deadRooms = 0;
 	for (const name of names) {
 		const room = await shard.loadRoom(name);
 		const terrain = coveredTerrain(template, name, core);
@@ -137,52 +118,76 @@ async function reportObjects(shard: Shard, names: readonly string[], template: R
 		if (lost !== 0) {
 			flagged.push(sources !== 0 && usableSources === 0 ? `${name} (no usable source)` : name);
 		}
-		if (sources !== 0 && usableSources === 0) {
-			deadRooms++;
-		}
 	}
-	if (flagged.length === 0) {
-		console.log('speedrun: every object keeps open ground beside it');
-	} else {
-		console.log(`speedrun: ${lostSources} source(s) and ${lostOthers} other object(s) have no open ` +
-			`ground beside them, in ${flagged.join(' ')}${deadRooms === 0 ? '' : `, ${deadRooms} room(s) left without a source`}`);
-	}
+	return { lostSources, lostOthers, flagged };
 }
 
 /**
- * Applies the shard's template to the world, and writes the terrain blob once. A world which already
- * holds it is left untouched, so this costs one terrain read per service start.
+ * Stamps the interior with one template. A dry run reads everything and writes nothing; a world which
+ * already holds the template writes nothing either.
  */
-export async function stampUniformRooms(shard: Shard) {
+export async function applyUniformTerrain(
+	shard: Shard,
+	request: UniformRequest,
+	options: { dryRun?: boolean } = {},
+): Promise<UniformReport> {
 	const world = await shard.loadWorld();
 	const core = sectorCoreRooms(world.terrain);
 	const layout = uniformLayout(world.terrain, core);
 	if (layout.core.length === 0 || layout.rooms.length === 0) {
-		console.log('speedrun: no sector records in this world, so there is no interior to cover');
-		return;
+		throw new Error('this world has no sector records, so there is no interior to cover');
 	}
-	const options = {
-		ringEdges: config.speedrun?.uniformRingEdges !== false,
-		sealCore: config.speedrun?.wallSectorCores !== false,
+	const sealing = {
+		ringEdges: request.ringEdges !== false,
+		sealCore: request.sealCore !== false,
 	};
-	const { spec, template, generated, repaired, attempts } = await loadTemplate(shard);
-	if (isUniform(world.terrain, template, layout, options)) {
-		return;
+	const { template, repaired, attempts, generated, terrainType, swampType } = buildTemplate(request);
+	const report: UniformReport = {
+		terrain: template,
+		terrainType,
+		swampType,
+		exitWidth: templateExitWidth(template),
+		generated,
+		repaired,
+		attempts,
+		covered: layout.rooms.length,
+		ringFaces: 0,
+		written: false,
+		lostSources: 0,
+		lostOthers: 0,
+		flagged: [],
+	};
+	if (!options.dryRun && !isUniform(world.terrain, template, layout, sealing)) {
+		// Rollback material: the world's terrain as it is now, written once and never overwritten.
+		// Taken as a copy, because the room records read out of the blob may write through to it.
+		const existing = await shard.data.get(backupKey, { blob: true });
+		const backup = Uint8Array.from(world.terrainBlob);
+		const touched = applyUniform(world.terrain, template, layout, sealing);
+		await Promise.all([
+			existing === null ? shard.data.set(backupKey, backup) : undefined,
+			shard.data.set('terrain', makeWriter(worldSchema)(world.terrain)),
+		]);
+		report.written = true;
+		report.ringFaces = touched.length - layout.rooms.length;
 	}
+	Object.assign(report, await reportObjects(
+		shard,
+		layout.rooms,
+		template,
+		sealing.sealCore ? layout.core : [],
+	));
+	return report;
+}
 
-	// Rollback material: the world's terrain as it is now, written once and never overwritten. Taken
-	// as a copy because the room records read out of the blob may write through to it.
-	const existingBackup = await shard.data.get(backupKey, { blob: true });
-	const backup = Uint8Array.from(world.terrainBlob);
-	const touched = applyUniform(world.terrain, template, layout, options);
-	await Promise.all([
-		existingBackup === null ? shard.data.set(backupKey, backup) : undefined,
-		shard.data.set('terrain', makeWriter(worldSchema)(world.terrain)),
-	]);
-	const ringFaces = touched.length - layout.rooms.length;
-	console.log(`speedrun: covered ${layout.rooms.length} rooms with terrain type ${spec.terrainType}/swamp ` +
-		`${spec.swampType}, ${spec.exitWidth} tile exits${generated ? ' (generated)' : ' (stored)'}` +
-		`${repaired ? `, repaired after ${attempts + 1} attempts` : ''}` +
-		`${ringFaces > 0 ? `, opened ${ringFaces} highway ring faces` : ''}`);
-	await reportObjects(shard, layout.rooms, template, options.sealCore ? layout.core : []);
+/**
+ * Puts the terrain back the way it was before the first stamp. Returns false when there is nothing to
+ * restore -- a world which was never stamped has no backup.
+ */
+export async function restoreTerrain(shard: Shard) {
+	const backup = await shard.data.get(backupKey, { blob: true });
+	if (backup === null) {
+		return false;
+	}
+	await shard.data.set('terrain', backup);
+	return true;
 }
