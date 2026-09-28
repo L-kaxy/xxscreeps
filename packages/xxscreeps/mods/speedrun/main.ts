@@ -4,7 +4,23 @@ import { schema as worldSchema } from 'xxscreeps/game/map.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
 import { captureDueBrackets, raceBrackets, resetExpiredRuns } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
+import { stampUniformRooms } from './uniform.js';
 import { isSolid, wallSectorCores } from './walls.js';
+
+// One terrain for the whole interior: every room of each sector's 9x9 interior is overwritten with a
+// single generated template, so no room is a better start than another. `uniform.ts` has the rule --
+// the template is `generate-room`'s own generator, with the same opening on all four sides so two
+// rooms share a border tile for tile -- and this is the registration, ahead of the core wall so the
+// interior is decided before the wall paints over the rooms around it.
+//
+// Terrain is the only thing written: no room blob is rewritten and no object is read, moved or
+// deleted, which is why the rule reports the objects a wall landed next to instead of moving them. A
+// world which already holds its template writes nothing, so this costs one terrain read per start.
+registerShardInitializer(async shard => {
+	if (config.speedrun?.uniformRooms === true) {
+		await stampUniformRooms(shard);
+	}
+});
 
 // Closing a room is xxscreeps' equivalent of the vanilla server's `closeRoom` console command: the
 // room is dropped from the world's open-room list -- `shard.data`'s `'rooms'` set -- and every

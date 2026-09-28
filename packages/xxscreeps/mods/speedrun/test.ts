@@ -9,7 +9,7 @@ import { Fn } from 'xxscreeps/functional/fn.js';
 import { instanceOfPredicate } from 'xxscreeps/functional/predicate.js';
 import { RoomPosition } from 'xxscreeps/game/position.js';
 import { Room } from 'xxscreeps/game/room/index.js';
-import { TERRAIN_MASK_WALL, TerrainWriter } from 'xxscreeps/game/terrain.js';
+import { TERRAIN_MASK_WALL, TerrainWriter, getBuffer } from 'xxscreeps/game/terrain.js';
 import { StructureController } from 'xxscreeps/mods/classic/controller/controller.js';
 import { Creep, create as createCreep } from 'xxscreeps/mods/classic/creep/creep.js';
 import { StructureWall, create as createWall } from 'xxscreeps/mods/classic/defense/wall.js';
@@ -1044,6 +1044,190 @@ describe('race restarts', () => {
 		assert.strictEqual(await shard.data.zCard(racingKey), 0, 'and let go of rather than read forever');
 		assert.strictEqual((await shard.db.data.hGetAll(runKey('100'))).run, '1', 'the run itself is left where it was');
 	}));
+});
+
+describe('uniform rooms', () => {
+	// The same quadrant of sectors the solid-core tests use, so a covered interior and a highway ring
+	// are both real. `TerrainWriter` starts all-plain and `exits` starts wide open, which makes both
+	// the stamping and the recomputed bitfield visible.
+	const quadrant = new Set<string>([ ...function*() {
+		for (let xx = 0; xx < 21; ++xx) {
+			for (let yy = 0; yy < 21; ++yy) {
+				yield `W${xx}N${yy}`;
+			}
+		}
+	}() ]);
+	const field = () => new Map([ ...quadrant ].map(name => {
+		const { sectors, sectorControl } = computeRoomMeta(name, quadrant);
+		return [ name, { sectors, sectorControl, exits: 15, terrain: new TerrainWriter() } ] as const;
+	}));
+	const spec = { terrainType: 1, swampType: 0, exitWidth: 8 };
+
+	/** The tiles of a room which carry plain ground, as `yy * 50 + xx` keys. */
+	const openTiles = (buffer: Uint8Array) => {
+		const tiles: number[] = [];
+		for (let yy = 0; yy < 50; ++yy) {
+			for (let xx = 0; xx < 50; ++xx) {
+				if (((buffer[(yy * 50 + xx) >>> 2]! >>> (((yy * 50 + xx) & 0x03) << 1)) & 0x03) !== TERRAIN_MASK_WALL) {
+					tiles.push(yy * 50 + xx);
+				}
+			}
+		}
+		return tiles;
+	};
+	const reachable = (buffer: Uint8Array, from: number) => {
+		const seen = new Set([ from ]);
+		const stack = [ from ];
+		while (stack.length > 0) {
+			const key = stack.pop()!;
+			const cx = key % 50;
+			const cy = (key - cx) / 50;
+			for (let dy = -1; dy <= 1; ++dy) {
+				for (let dx = -1; dx <= 1; ++dx) {
+					const xx = cx + dx;
+					const yy = cy + dy;
+					if (xx < 0 || yy < 0 || xx > 49 || yy > 49) {
+						continue;
+					}
+					const next = yy * 50 + xx;
+					if (!seen.has(next) && ((buffer[next >>> 2]! >>> ((next & 0x03) << 1)) & 0x03) !== TERRAIN_MASK_WALL) {
+						seen.add(next);
+						stack.push(next);
+					}
+				}
+			}
+		}
+		return seen;
+	};
+	const borderRun = (buffer: Uint8Array, side: 'top' | 'bottom' | 'left' | 'right') => {
+		const run: number[] = [];
+		for (let ii = 1; ii < 49; ++ii) {
+			const xx = side === 'top' || side === 'bottom' ? ii : side === 'left' ? 0 : 49;
+			const yy = side === 'top' ? 0 : side === 'bottom' ? 49 : ii;
+			const index = yy * 50 + xx;
+			if (((buffer[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03) !== TERRAIN_MASK_WALL) {
+				run.push(ii);
+			}
+		}
+		return run;
+	};
+
+	/** Every side of a template carries the same opening, and everything behind it is reachable from
+	 * any of the four -- the whole reason one room can be reused across the map. */
+	const assertTemplate = (buffer: Uint8Array) => {
+		const top = borderRun(buffer, 'top');
+		assert.deepStrictEqual(borderRun(buffer, 'bottom'), top, 'the bottom opening mirrors the top');
+		assert.deepStrictEqual(borderRun(buffer, 'left'), top, 'the left opening matches them');
+		assert.deepStrictEqual(borderRun(buffer, 'right'), top, 'the right opening matches them');
+		assert.deepStrictEqual(top, templateExits(8).top, 'and it is the opening that was asked for');
+		for (const side of [ 'top', 'bottom', 'left', 'right' ] as const) {
+			const run = new Set(top);
+			for (let ii = 1; ii < 49; ++ii) {
+				const xx = side === 'top' || side === 'bottom' ? ii : side === 'left' ? 0 : 49;
+				const yy = side === 'top' ? 0 : side === 'bottom' ? 49 : ii;
+				const index = yy * 50 + xx;
+				const wall = ((buffer[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03) === TERRAIN_MASK_WALL;
+				assert.strictEqual(wall, !run.has(ii), `the border of the ${side} is sealed outside its opening at ${ii}`);
+			}
+		}
+		const open = openTiles(buffer);
+		const region = reachable(buffer, open[0]!);
+		assert.strictEqual(region.size, open.length, 'the room is one open region');
+		for (const throat of [ 25, 25 * 50, 25 * 50 + 49, 49 * 50 + 25 ]) {
+			assert.ok(region.has(throat), `the opening at ${throat} is reachable`);
+		}
+	};
+
+	test('the ruleset ships with the rule off', () => {
+		assert.strictEqual(
+			initializationDefaults.speedrun.uniformRooms,
+			false,
+			'an operator opts in with `uniformRooms: true`',
+		);
+	});
+
+	test('a generated template opens all four sides the same way', () => {
+		for (const terrainType of [ 1, 2, 28 ]) {
+			const { terrain, repaired } = generateTemplate({ ...spec, terrainType });
+			assert.strictEqual(repaired, false, `layout ${terrainType} converges on its own`);
+			assert.strictEqual(templateExitWidth(terrain), 8, `layout ${terrainType} keeps the opening`);
+			assertTemplate(terrain);
+		}
+	});
+
+	test('a layout which comes out in pieces is repaired rather than rerolled', () => {
+		// Layouts with more wall than ground leave the four openings in separate regions, which
+		// `room-gen` answers by rerolling the layout. A template cannot: it carves the exits into the
+		// main region instead, and keeps the layout the operator asked for.
+		for (const terrainType of [ 8, 15 ]) {
+			const { terrain, repaired } = generateTemplate({ ...spec, terrainType });
+			assert.strictEqual(repaired, true, `layout ${terrainType} leaves the room in pieces`);
+			assertTemplate(terrain);
+		}
+	});
+
+	test('the interiors and the highway ring come out of the sector records', () => {
+		const terrain = field();
+		const layout = uniformLayout(terrain, sectorCoreRooms(terrain));
+		assert.strictEqual(layout.core.length, 36, 'four cores of nine rooms');
+		assert.strictEqual(layout.rooms.length, 4 * 81 - 36, 'four interiors of 81 rooms, minus their cores');
+		assert.ok(layout.ring.length > 0, 'the highway ring is read too');
+		assert.strictEqual(
+			layout.rooms.filter(name => layout.ring.includes(name)).length,
+			0,
+			'and no room is both covered and ring',
+		);
+	});
+
+	test('the template lands on every covered room, and a core face stays shut', () => {
+		const terrain = field();
+		const core = sectorCoreRooms(terrain);
+		const layout = uniformLayout(terrain, core);
+		const { terrain: template } = generateTemplate(spec);
+		assert.strictEqual(isUniform(terrain, template, layout, { ringEdges: true, sealCore: true }), false, 'a plain world is not uniform');
+		const touched = applyUniform(terrain, template, layout, { ringEdges: true, sealCore: true });
+		assert.strictEqual(new Set(touched).size, touched.length, 'the touched list holds each room once');
+		assert.strictEqual(
+			touched.filter(name => layout.rooms.includes(name)).length,
+			layout.rooms.length,
+			'every covered room was written',
+		);
+		assert.ok(touched.length > layout.rooms.length, 'and the ring faces which look at one of them');
+		assert.strictEqual(isUniform(terrain, template, layout, { ringEdges: true, sealCore: true }), true, 'and the world now holds it');
+
+		// `W2N2` is inside a sector with no core next to it: template everywhere.
+		const inside = terrain.get('W2N2')!;
+		assert.deepStrictEqual([ ...getBuffer(inside.terrain) ], [ ...template ], 'W2N2 carries the template');
+		assert.strictEqual(inside.exits, 15, 'W2N2 keeps all four exits');
+		// `W3N4` shares its west edge with the core room `W4N4`: that edge stays wall (as
+		// `wallSectorCores` leaves it) and the west exit goes with it.
+		const beside = terrain.get('W3N4')!;
+		for (let yy = 0; yy < 50; ++yy) {
+			assert.strictEqual(beside.terrain.get(0, yy), TERRAIN_MASK_WALL, `W3N4 0,${yy} stays wall`);
+		}
+		assert.strictEqual(beside.exits, 1 | 2 | 4, 'W3N4 loses the exit into the core');
+		// A room two out from a core is not next to it at all.
+		assert.strictEqual(terrain.get('W2N4')!.exits, 15, 'W2N4 is not adjacent to a core');
+
+		// Every room on the edge of the interior faces the ring, which has to be open there too, or a
+		// creep walking out is handed into a wall. `W0` is the ring *east* of `W1` -- a larger W
+		// number is further west -- so the shared edge is `W0N5`'s own west column.
+		const ring = new Set(layout.ring);
+		const border = terrain.get('W1N5')!;
+		assert.strictEqual(ring.has('W0N5'), true, 'W0N5 is the highway ring east of W1N5');
+		for (let yy = 21; yy <= 28; ++yy) {
+			assert.strictEqual(terrain.get('W0N5')!.terrain.get(0, yy), 0, `W0N5 0,${yy} is opened`);
+		}
+		assert.strictEqual(border.exits, 15, 'W1N5 keeps all four exits');
+
+		// A second pass writes nothing, and the rule notices a single changed tile.
+		const snapshot = () => [ ...terrain ].map(([ name, record ]) => `${name}:${record.exits}:${record.terrain.get(25, 25)}`).join(' ');
+		const before = snapshot();
+		applyUniform(terrain, template, layout, { ringEdges: true, sealCore: true });
+		assert.strictEqual(snapshot(), before, 'a second pass is a no-op');
+		inside.terrain.set(20, 20, TERRAIN_MASK_WALL);
+		assert.strictEqual(isUniform(terrain, template, layout, { ringEdges: true, sealCore: true }), false, 'one walled tile is detected');
+	});
 });
 
 /** Queue the `placeSpawn` intent a landing goes through (`mods/classic/spawn/backend.ts:172`). */
