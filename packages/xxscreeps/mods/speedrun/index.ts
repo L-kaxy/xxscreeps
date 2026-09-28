@@ -41,9 +41,11 @@ import * as types from 'xxscreeps/tsroot.js';
 //    - `raceBrackets` (default `[ 20000, 40000 ]`): the tick offsets after a landing which are
 //      recorded as race results. `processor.ts` chains `placeSpawn` to start a run and schedule the
 //      brackets, and `main.ts` drains the schedule from the shard tick processor, so a result lands
-//      whether or not the player is online. `race.ts` owns the two tables (`speedrun/run`,
-//      `speedrun/score`) and the ranked set a list page reads; a run only scores while its room is
-//      still held at RCL 2 or above.
+//      whether or not the player is online. `race.ts` owns the tables (`speedrun/run`,
+//      `speedrun/score`, `speedrun/rank`, `speedrun/best`, `speedrun/runs`, `speedrun/brackets`,
+//      plus the shard's `speedrun/due` and `speedrun/racing`); a run only scores while its room is
+//      still held at RCL 2 or above. `backend.ts` serves the three pages: a bracket's list (one row
+//      per player, their best), one player's records, and the runs still in progress.
 //
 //    - `claimController` (default `false`): `Creep.claimController` is refused before it records an
 //      intent, so players cannot take a room. `reserveController`, `attackController` and
@@ -76,6 +78,6 @@ export const manifest: Manifest = {
 		// The closure rule reads `sectorControl` off the world's terrain records, which this mod owns.
 		'xxscreeps/mods/modern/sector',
 	],
-	provides: [ 'config', 'driver', 'game', 'main', 'processor', 'test' ],
+	provides: [ 'backend', 'config', 'driver', 'game', 'main', 'processor', 'test' ],
 	types,
 };
