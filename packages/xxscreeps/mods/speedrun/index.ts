@@ -26,6 +26,12 @@ import * as types from 'xxscreeps/tsroot.js';
 //      and their schedule; nothing is written to or deleted from the world. See the second half of
 //      `processor.ts`.
 //
+//    - `ruins` (default `false`): a destroyed structure leaves no ruin behind. Every lane which
+//      puts one down -- combat and decay destruction, and the two spawn intents whose ruins carry a
+//      100000/500000 tick decay -- goes through `Room['#insertObject']`, so that one method is
+//      wrapped in `processor.ts` and a `Ruin` handed to it is dropped before it is queued. Nothing
+//      about the room blob format changes, and the destroy event log entry is still written.
+//
 //    - `claimController` (default `false`): `Creep.claimController` is refused before it records an
 //      intent, so players cannot take a room. `reserveController`, `attackController` and
 //      `upgradeController` are untouched, and the starting room a new player is handed goes through
