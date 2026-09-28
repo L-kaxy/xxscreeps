@@ -1,5 +1,6 @@
 import { config } from 'xxscreeps/config/index.js';
-import { registerRoomTickProcessor } from 'xxscreeps/engine/processor/index.js';
+import { registerIntentProcessor, registerRoomTickProcessor } from 'xxscreeps/engine/processor/index.js';
+import { Room } from 'xxscreeps/game/room/index.js';
 
 // The vanilla raid generator (`mods/classic/invader`) sends a party of three small invaders once a
 // room's harvest budget passes `INVADERS_ENERGY_GOAL`, and only then banks the goal for the next
@@ -19,3 +20,26 @@ registerRoomTickProcessor((room, context) => {
 		context.didUpdate();
 	}
 });
+
+// The two resource generators -- `mods/modern/deposit` and `mods/modern/powerbank` -- put their
+// objects down through the internal room intents `placeDeposit` and `placePowerBank`. A shard tick
+// processor picks a room and pushes the intent, and the room intent stage reads terrain and inserts
+// the object; that stage is therefore the one point every deposit and every power bank has to pass,
+// and the point this rule takes over.
+//
+// `registerIntentProcessor` appends to a list and `initializeIntentConstraints`
+// (`engine/processor/index.ts:137-201`) sorts that list, then hands the room stage the *first* entry
+// whose receiver matches the room (`room.ts:134`). Registering the same intent on `Room` while
+// naming that intent in `before` therefore shadows the generator's handler: the intent arrives, the
+// placement is dropped, and no object is created. Existing objects are not touched -- they keep
+// their tick processor, their decay and their schedule, so a generator which is switched back on
+// picks up where it left off (its next fire is at most one cadence away). Nothing is written to or
+// deleted from the world.
+//
+// The switch is read while the module loads, so flipping it needs a service restart.
+if (config.speedrun?.deposits !== true) {
+	registerIntentProcessor(Room, 'placeDeposit', { before: [ 'placeDeposit' ], internal: true }, () => {});
+}
+if (config.speedrun?.powerBanks !== true) {
+	registerIntentProcessor(Room, 'placePowerBank', { before: [ 'placePowerBank' ], internal: true }, () => {});
+}

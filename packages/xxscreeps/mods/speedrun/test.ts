@@ -1,8 +1,19 @@
 import { config } from 'xxscreeps/config/index.js';
+import { runShardInitializers } from 'xxscreeps/engine/processor/shard.js';
+import { intentProcessors } from 'xxscreeps/engine/processor/symbols.js';
+import { Fn } from 'xxscreeps/functional/fn.js';
+import { instanceOfPredicate } from 'xxscreeps/functional/predicate.js';
 import { RoomPosition } from 'xxscreeps/game/position.js';
+import { Room } from 'xxscreeps/game/room/index.js';
 import { TERRAIN_MASK_WALL, TerrainWriter } from 'xxscreeps/game/terrain.js';
 import { create as createCreep } from 'xxscreeps/mods/classic/creep/creep.js';
+import { loadSectorDeposits, setDepositBootstrapScatterForTesting } from 'xxscreeps/mods/modern/deposit/main.js';
+import { dueSectorsAt } from 'xxscreeps/mods/modern/deposit/model.js';
+import { inspectDuePowerBankRoomsForTest, scheduleRoom } from 'xxscreeps/mods/modern/powerbank/model.js';
+import { StructurePowerBank } from 'xxscreeps/mods/modern/powerbank/powerbank.js';
 import { computeRoomMeta, roomType } from 'xxscreeps/mods/modern/sector/terrain.js';
+import { deterministicRandomForTesting } from 'xxscreeps/test/fixtures.js';
+import { testWorld } from 'xxscreeps/test/import.js';
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
 import { initializationDefaults } from './config.js';
@@ -224,7 +235,75 @@ describe('mods/speedrun', () => {
 			assert.strictEqual(snapshot(), before, 'a second pass is a no-op');
 		});
 	});
+
+	describe('resource generators', () => {
+		test('the ruleset ships with both generators stopped', () => {
+			assert.strictEqual(
+				initializationDefaults.speedrun.deposits,
+				false,
+				'an operator opts in with `deposits: true`',
+			);
+			assert.strictEqual(
+				initializationDefaults.speedrun.powerBanks,
+				false,
+				'an operator opts in with `powerBanks: true`',
+			);
+		});
+
+		test('the placement intents resolve to the ruleset handler', () => {
+			// The mechanism is that `initializeIntentConstraints` sorts registrations and the room
+			// intent stage takes the first entry whose receiver matches the room. The generator's
+			// handler carries the four arguments of the intent, the ruleset's carries none.
+			for (const intent of [ 'placeDeposit', 'placePowerBank' ]) {
+				const infos = intentProcessors.filter(info => info.intent === intent && info.receiver === Room);
+				assert.ok(infos.length > 0, `${intent} is registered`);
+				assert.strictEqual(infos[0]!.process.length, 0, `${intent} resolves to the ruleset handler`);
+			}
+		});
+
+		test('a due sector is evaluated without placing a deposit', () => simulate({})(async ({ shard, tick }) => {
+			using bootstrap = withDepositBootstrap();
+			await runShardInitializers(shard);
+			assert.ok((await dueSectorsAt(shard, Date.now())).includes('W5N5'), 'the sector came due');
+			await tick(2);
+			// The evaluator still ran: it drained the due entry and pushed the next check five minutes
+			// out, which is the same pass which pushes the placement intent.
+			assert.deepStrictEqual(await dueSectorsAt(shard, Date.now()), [], 'the sector was evaluated');
+			const { sectorControl } = testWorld.map['#getRoomTraits']('W5N5');
+			assert.ok(sectorControl, 'the test world has a single sector, W5N5');
+			const deposits = await loadSectorDeposits(shard, testWorld, 'W5N5', sectorControl.edges);
+			assert.strictEqual(deposits.length, 0, 'and no deposit was placed');
+		}));
+
+		test('a due highway room runs its timer without placing a power bank', () => simulate({})(async ({ shard, tick }) => {
+			using rng = deterministicRandomForTesting();
+			const scheduledAt = shard.time;
+			await scheduleRoom(shard, 'W0N0', 0);
+			await tick(2);
+			const room = await shard.loadRoom('W0N0');
+			assert.strictEqual(
+				Fn.find(room['#objects'], instanceOfPredicate(StructurePowerBank)),
+				undefined,
+				'no power bank was placed',
+			);
+			// The generator ran: it rolled the next respawn and pushed the scratch schedule forward.
+			const due = (await inspectDuePowerBankRoomsForTest(shard)).find(([ , roomName ]) => roomName === 'W0N0');
+			assert.ok(due, 'W0N0 is still scheduled');
+			assert.ok(due[0] - scheduledAt >= C.POWER_BANK_RESPAWN_TIME * 0.75, 'its timer moved into the future');
+			// The next-due tick is persisted by the intent handler, which the ruleset takes over -- so the
+			// room itself is left exactly as it was: nothing is written to the world.
+			assert.strictEqual(room['#nextPowerBankTime'], 0, 'the room was not written to');
+		}));
+	});
 });
+
+/** Deterministic placement RNG plus a zero-scatter bootstrap, so the test world's sector comes due at init. */
+function withDepositBootstrap(seed = 1): Disposable {
+	const stack = new DisposableStack();
+	stack.use(deterministicRandomForTesting(seed));
+	stack.use(setDepositBootstrapScatterForTesting(() => 0));
+	return stack;
+}
 
 /** Toggle raid generation for one test, restoring whatever the configuration said. */
 function withInvaders(invaders: boolean) {

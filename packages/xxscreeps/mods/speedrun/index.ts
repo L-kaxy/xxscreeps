@@ -20,6 +20,12 @@ import * as types from 'xxscreeps/tsroot.js';
 //      from banking an invasion budget. See `processor.ts` for the mechanism, and `test.ts` for
 //      the assertions which pin it down.
 //
+//    - `deposits` / `powerBanks` (default `false`): the two resource generators -- `modern/deposit`
+//      and `modern/powerbank` -- are stopped at their placement intent, so no new deposit or power
+//      bank is ever put down. Objects already in the world keep their tick processor, their decay
+//      and their schedule; nothing is written to or deleted from the world. See the second half of
+//      `processor.ts`.
+//
 //    - `closeCenterNine` (default `true`): the sector cores -- each sector's center room plus its
 //      eight neighbours, the same central 3x3 the vanilla server's `closeRoom` console command was
 //      aimed at -- are dropped from the world's open-room list on every service start, which is
