@@ -756,9 +756,25 @@ export const kDefaultSources = 2;
 /**
  * Plans keep this far from the border. A covered room which looks at a core keeps that whole face
  * walled; no face is nearer the border than the outer ring of tiles, so this alone keeps a planned
- * object off a sealed face.
+ * object off a sealed face. Every box below starts at or beyond it.
  */
 const kPlanMargin = 3;
+
+/**
+ * Where each kind of object may be searched for, as `min` and `span` on both axes -- `room-gen`'s own
+ * boxes (`scripts/room-gen.ts` hands `findRandomPosition` `3, 44` for sources, `5, 40` for the
+ * controller and `4, 42` for the mineral).
+ */
+const kBoxes = {
+	source: { min: 3, span: 44 },
+	controller: { min: 5, span: 40 },
+	mineral: { min: 4, span: 42 },
+} as const;
+
+interface PlanBox {
+	min: number;
+	span: number;
+}
 
 /**
  * Spacings tried in turn until one fits, in tiles. Sources follow `room-gen`'s own spread rule
@@ -774,24 +790,40 @@ function terrainAt(template: Readonly<Uint8Array>, xx: number, yy: number) {
 }
 
 /**
- * Every tile of the template a planned object may stand on: walkable ground inside the margin with
- * walkable ground beside it to work from, plain before swamp. Unlike a payload marker -- which is
- * written into the terrain and reads back as a wall -- a planned object simply stands on its tile,
- * so the tile itself has to be ground a creep could otherwise have walked over.
+ * Every tile of the template a planned object may stand on: a wall tile inside the margin with
+ * walkable ground beside it, which is `room-gen`'s own rule (`scripts/room-gen.ts`'s `isPlaceable`:
+ * a wall tile, nothing else on it, and a passable neighbour).
+ *
+ * The object stands *in* the wall rather than on open ground, the way every room the generator has
+ * ever built reads: a payload records an object as a marker character standing in for the terrain
+ * character of its tile, and importing one writes a wall under it, so a room only round-trips if the
+ * wall is there. Tiles whose ground beside them is plain come first, so an object lands in the open
+ * part of the wall wherever the layout allows it.
  */
-export function planTiles(template: Readonly<Uint8Array>): PlanTile[] {
+export function planTiles(template: Readonly<Uint8Array>, box: PlanBox = kBoxes.source): PlanTile[] {
 	const plain: PlanTile[] = [];
 	const swamp: PlanTile[] = [];
-	const last = kGridSize - kPlanMargin - 1;
-	for (let yy = kPlanMargin; yy <= last; ++yy) {
-		for (let xx = kPlanMargin; xx <= last; ++xx) {
-			const terrain = terrainAt(template, xx, yy);
-			if (terrain !== TERRAIN_MASK_WALL && hasStandingRoom(template, xx, yy)) {
-				(terrain === TERRAIN_MASK_SWAMP ? swamp : plain).push({ x: xx, y: yy });
+	const first = Math.max(box.min, kPlanMargin);
+	const last = box.min + box.span - 1;
+	for (let yy = first; yy <= last; ++yy) {
+		for (let xx = first; xx <= last; ++xx) {
+			if (terrainAt(template, xx, yy) !== TERRAIN_MASK_WALL || !hasStandingRoom(template, xx, yy)) {
+				continue;
 			}
+			(hasPlainNeighbor(template, xx, yy) ? plain : swamp).push({ x: xx, y: yy });
 		}
 	}
 	return [ ...plain, ...swamp ];
+}
+
+/** Whether a creep standing beside (xx, yy) would be on plain ground rather than swamp. */
+function hasPlainNeighbor(template: Readonly<Uint8Array>, xx: number, yy: number) {
+	for (const [ nxx, nyy ] of iterateInRange(xx, yy, 1)) {
+		if ((nxx !== xx || nyy !== yy) && terrainAt(template, nxx, nyy) === 0) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function tileDistance(left: PlanTile, right: PlanTile) {
@@ -827,8 +859,16 @@ export function objectPlan(
 	sources: number,
 	seed = planSeed(template, sources),
 ): ObjectPlan {
-	const order = [ ...shuffle(planTiles(template), seed) ];
-	const spread = (count: number, spacings: readonly number[], anchors: readonly PlanTile[]) => {
+	const orders = new Map<PlanBox, PlanTile[]>();
+	const orderFor = (box: PlanBox) => {
+		let order = orders.get(box);
+		if (order === undefined) {
+			orders.set(box, order = [ ...shuffle(planTiles(template, box), seed) ]);
+		}
+		return order;
+	};
+	const spread = (count: number, spacings: readonly number[], anchors: readonly PlanTile[], box: PlanBox) => {
+		const order = orderFor(box);
 		for (const spacing of spacings) {
 			const tiles: PlanTile[] = [ ...anchors ];
 			while (tiles.length < anchors.length + count) {
@@ -844,12 +884,12 @@ export function objectPlan(
 		}
 		return undefined;
 	};
-	const sourceTiles = spread(sources, kSourceSpacings, []);
+	const sourceTiles = spread(sources, kSourceSpacings, [], kBoxes.source);
 	if (sourceTiles === undefined || sourceTiles.length !== sources) {
 		throw new Error(`this layout leaves no ground for ${sources} source(s); pick a lighter terrain-type`);
 	}
-	const controller = spread(1, kStationSpacings, sourceTiles)?.[0];
-	const mineral = spread(1, kStationSpacings, controller === undefined ? sourceTiles : [ ...sourceTiles, controller ])?.[0];
+	const controller = spread(1, kStationSpacings, sourceTiles, kBoxes.controller)?.[0];
+	const mineral = spread(1, kStationSpacings, controller === undefined ? sourceTiles : [ ...sourceTiles, controller ], kBoxes.mineral)?.[0];
 	if (controller === undefined || mineral === undefined) {
 		throw new Error('this layout leaves no ground for a mineral and a controller; pick a lighter terrain-type');
 	}

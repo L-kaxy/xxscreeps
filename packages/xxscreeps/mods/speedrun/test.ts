@@ -1239,7 +1239,7 @@ describe('uniform rooms', () => {
 				for (const tile of tiles) {
 					const index = tile.y * 50 + tile.x;
 					const mask = (terrain[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03;
-					assert.notStrictEqual(mask, TERRAIN_MASK_WALL, `${tile.x},${tile.y} stands on ground`);
+					assert.strictEqual(mask, TERRAIN_MASK_WALL, `${tile.x},${tile.y} is a wall tile to stand in`);
 					assert.strictEqual(hasStandingRoom(terrain, tile.x, tile.y), true, `${tile.x},${tile.y} has ground beside it`);
 				}
 				assert.deepStrictEqual(objectPlan(terrain, sources), plan, 'the same template plans the same tiles');
