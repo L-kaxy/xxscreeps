@@ -15,11 +15,11 @@ import { hasStandingRoom, planTiles } from './template.js';
  * The object half of the uniform world: every covered room is given the plan's sources, mineral and
  * controller, so no room has a source in a corner while another has one walled in.
  *
- * A planned tile is ground the template left walkable, so an object placed on it always has somewhere
- * for a creep to stand and the room's yield no longer depends on where the room's own layout happened
- * to drop a source. What the room holds beyond that -- spawns, walls, roads, creeps -- is never
- * touched; a planned tile another object already stands on is nudged to the nearest free ground
- * instead, and the room is reported so the operator can see it happened.
+ * A planned tile is a wall tile the template carries with walkable ground beside it, so an object
+ * placed in it always has somewhere for a creep to stand -- and the rooms read the way `room-gen`
+ * built them, objects standing in the wall. What a room holds beyond that -- spawns, walls, roads,
+ * creeps -- is never touched; a planned tile another object already stands on is nudged to the
+ * nearest free tile instead, and the room is reported so the operator can see it happened.
  */
 
 export interface PlaceRequest {
