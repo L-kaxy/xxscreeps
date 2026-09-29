@@ -5,8 +5,10 @@ import bodyParser from 'koa-bodyparser';
 import ConditionalGet from 'koa-conditional-get';
 import Router from 'koa-router';
 import { config } from 'xxscreeps/config/index.js';
+import { getServiceChannel } from 'xxscreeps/engine/service/index.js';
 import { handleInterruptSignal } from 'xxscreeps/engine/service/signal.js';
 import { initializeGameEnvironment } from 'xxscreeps/game/index.js';
+import { mustNotReject } from 'xxscreeps/utility/async.js';
 import { authentication } from './auth/index.js';
 import { BackendContext } from './context.js';
 import { installEndpointHandlers } from './endpoints/index.js';
@@ -22,6 +24,21 @@ initializeGameEnvironment();
 // Initialize services
 await using backendContext = await BackendContext.connect();
 hooks.makeIterated('backendReady')(backendContext.db, backendContext.shard);
+
+// Fork: the world is an input read once at boot, so a terrain edit made while the server runs is
+// only served after this. `manage game reload-terrain` publishes the message; the caches in the
+// terrain routes are keyed by the `World` object, so swapping it is enough to drop them.
+using serviceDisposables = new DisposableStack();
+const serviceChannel = serviceDisposables.use(await getServiceChannel(backendContext.shard).subscribe());
+serviceDisposables.defer(serviceChannel.listen(message => {
+	if (message.type === 'reloadTerrain') {
+		mustNotReject(async () => {
+			await backendContext.reloadWorld();
+			console.log('🌎 Terrain reloaded');
+		});
+	}
+}));
+
 const koa = new Koa<State, Context>();
 const router = new Router<State, Context>();
 

@@ -18,6 +18,9 @@ export function getAckChannel(shard: Shard, user: string) {
 
 export function getRunnerChannel(shard: Shard) {
 	type RunnerMessage =
+		// Fork: re-read the terrain blob and rebuild the player sandboxes from it; see
+		// `engine/service/main.ts`.
+		{ type: 'reloadTerrain' } |
 		{ type: 'shutdown' } |
 		{ type: 'run'; time: number };
 	return new Channel<RunnerMessage>(shard.pubsub, 'channel/runner');

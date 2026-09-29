@@ -11,6 +11,9 @@ export type ServiceMessage =
 	{ type: 'pause' } |
 	{ type: 'pausedTick' } |
 	{ type: 'unpause' } |
+	// Fork: every service holding a copy of the terrain blob re-reads it. Published by
+	// `manage game reload-terrain`; see `engine/service/main.ts`.
+	{ type: 'reloadTerrain' } |
 	{ type: 'mainConnected' } |
 	{ type: 'mainDisconnected' } |
 	{ type: 'processorConnected' } |

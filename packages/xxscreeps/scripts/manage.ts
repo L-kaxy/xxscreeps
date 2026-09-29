@@ -71,6 +71,24 @@ async function pauseTick(count: number) {
 	}
 }
 
+// Terrain is an input each service reads once, at boot: the backend builds the world it serves the
+// client from, the processor and the runner each seed a pathfinder with it. Editing the blob under a
+// running server therefore changes nothing until every one of them re-reads it, which is what this
+// message asks for. It has to travel through the running services' own message socket, so run it from
+// inside their container, with the server up.
+async function reloadTerrain() {
+	try {
+		await getServiceChannel(shard).publish({ type: 'reloadTerrain' });
+	} catch {
+		throw new Error('Could not reach the running services. Run this inside the server container ' +
+			'(docker exec -i xxscreeps /xxscreeps/node_modules/.bin/xxscreeps manage game reload-terrain), ' +
+			'with the server up.');
+	}
+	out('Terrain reload requested: the backend serves it from the next request, the processor and ' +
+		'the runner from the top of their next tick. Player sandboxes are rebuilt from the new terrain ' +
+		'-- Memory and CPU buckets are untouched.');
+}
+
 // Accepts either a raw user id or a username.
 async function resolveUserId(who: string) {
 	if (await db.data.sIsMember('users', who)) {
@@ -450,6 +468,7 @@ function usage(): never {
 	game pause
 	game pause-tick [count]
 	game unpause
+	game reload-terrain
   user list
   user show     <name|id>
   user create   <name> [email]
@@ -481,6 +500,7 @@ try {
 			break;
 		}
 		case 'game unpause': await getServiceChannel(shard).publish({ type: 'unpause' }); break;
+		case 'game reload-terrain': await reloadTerrain(); break;
 		case 'user list': await userList(); break;
 		case 'user show': if (rest[0] === undefined) usage(); await userShow(rest[0]); break;
 		case 'user create': if (rest[0] === undefined) usage(); await userCreate(rest[0], rest[1]); break;

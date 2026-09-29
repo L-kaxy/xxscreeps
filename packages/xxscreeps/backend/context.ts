@@ -6,7 +6,9 @@ import { AsyncDisposableResource } from 'xxscreeps/utility/utility.js';
 export class BackendContext extends AsyncDisposableResource {
 	readonly db;
 	readonly shard;
-	readonly world;
+	// Fork: not readonly -- `reloadWorld` swaps it in place when `manage game reload-terrain` asks
+	// for it. Caches downstream are keyed by this object, so replacing it drops them.
+	world: World;
 	readonly accessibleRooms;
 
 	private constructor(disposable: AsyncDisposableStack, db: Database, shard: Shard, world: World, accessibleRooms: Set<string>) {
@@ -26,5 +28,12 @@ export class BackendContext extends AsyncDisposableResource {
 		const rooms = await shard.data.sMembers('rooms');
 		const context = new BackendContext(disposable.move(), db, shard, world, new Set(rooms));
 		return context;
+	}
+
+	/** Fork: re-read the terrain blob. Terrain is an input read once at boot, so a world edited
+	 * while the server runs is only served after this -- `manage game reload-terrain` calls it. */
+	async reloadWorld() {
+		this.world = await this.shard.loadWorld();
+		return this.world;
 	}
 }

@@ -14,6 +14,8 @@ export function getProcessorChannel(shard: Shard) {
 	type Message =
 		{ type: 'finalize'; time: number } |
 		{ type: 'process'; time: number; roomNames?: string[] } |
+		// Fork: re-read the terrain blob and hand it to the workers; see `engine/service/main.ts`.
+		{ type: 'reloadTerrain' } |
 		{ type: 'shutdown' };
 	return new Channel<Message>(shard.pubsub, 'channel/processor');
 }
