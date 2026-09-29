@@ -82,7 +82,8 @@ import * as types from 'xxscreeps/tsroot.js';
 //    - `uniform-terrain`, a command rather than a rule -- nothing here runs on its own:
 //
 //         xxscreeps uniform-terrain [--shard shard] [--terrain-type 1-28] [--swamp-type 0-14]
-//                 [--exits 8] [--template file.json] [--save file.json] [--dry-run] [--restore]
+//                 [--exits 8] [--sources 1-4] [--mineral H|O|Z|K|U|L|X] [--no-objects]
+//                 [--template file.json] [--save file.json] [--dry-run] [--restore]
 //
 //      It overwrites every room of each sector's 9x9 interior -- everything but the core, 72 rooms of
 //      the stock world -- with one generated template, so no room is a better start than another.
@@ -92,10 +93,18 @@ import * as types from 'xxscreeps/tsroot.js';
 //      whole grid walks through. A layout which would come out in several pieces is repaired rather
 //      than rerolled, so all 28 connect. Rooms around a core keep the face which looks at it shut,
 //      and the highway ring is opened on the faces which look at a covered room, or the outermost
-//      rooms would advertise exits the ring seals. Terrain is all that is written -- no room blob, no
-//      object -- and the sources a wall landed next to are printed for the operator to decide about,
-//      with a dry run available. `--restore` writes the terrain from before the first stamp back;
-//      it is kept under `speedrun/terrainBackup`. See `uniform.ts` for the write.
+//      rooms would advertise exits the ring seals.
+//
+//      The objects follow the same idea. The template plans the tiles its sources, its mineral and
+//      its controller go on -- off the terrain, the way `room-gen` places them, so every one of them
+//      has ground beside it -- and every covered room is moved onto that plan: its own sources, ones
+//      it was missing, or fewer than `--sources` asks for, its mineral with the extractor built on
+//      it, and its controller. Nothing else in a room is touched; a planned tile another object
+//      already stands on is nudged to the nearest free ground and the room is reported. `--no-objects`
+//      writes the terrain alone. Both stores are written under the game mutex, and both are kept
+//      before they are: the terrain under `speedrun/terrainBackup`, each rewritten room under
+//      `speedrun/uniformRoomBackup`. `--restore` writes both back. See `uniform.ts` for the write,
+//      `place.ts` for the objects and `template.ts` for the plan.
 //
 // Providers are resolved as `<modDir>/<provide>.ts` or `<modDir>/<provide>/index.ts`; the ones
 // available are `backend`, `config`, `constants`, `driver`, `game`, `main`, `processor`, `schema`,

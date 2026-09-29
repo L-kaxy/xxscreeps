@@ -1,34 +1,40 @@
+import type { ObjectPlan } from 'xxscreeps/mods/speedrun/template.js';
 import type { UniformReport } from 'xxscreeps/mods/speedrun/uniform.js';
 import * as fs from 'node:fs/promises';
 import { checkArguments } from 'xxscreeps/config/arguments.js';
 import { config } from 'xxscreeps/config/index.js';
 import { Database, Shard } from 'xxscreeps/engine/db/index.js';
-import { applyUniformTerrain, restoreTerrain } from 'xxscreeps/mods/speedrun/uniform.js';
+import { applyUniformTerrain, restoreUniform } from 'xxscreeps/mods/speedrun/uniform.js';
 import { parseRoomOptions } from 'xxscreeps/scripts/generate-room.js';
 
-// One terrain for the whole interior, as a command rather than as a rule a service start applies: it
+// One world for the whole interior, as a command rather than as a rule a service start applies: it
 // runs when an operator runs it and does nothing on its own.
 //
 // Every room of every sector's 9x9 interior -- everything but the core, 72 rooms of the stock world
-// -- is overwritten with one generated template, so no room is a better start than another. The
-// template is `generate-room`'s own generator, sharing its `--terrain-type` and `--swamp-type`
-// ranges, with one change: every side carries the same centred opening (`--exits`, default 8)
-// instead of the exits the neighbours happen to have, so two rooms built from it share a border tile
-// for tile and the whole grid walks through. A layout which comes out in several pieces is repaired
-// rather than rerolled, so every layout connects.
+// -- is overwritten with one generated template and given the same sources, mineral and controller
+// on the same tiles, so no room is a better start than another. The terrain is `generate-room`'s own
+// generator, sharing its `--terrain-type` and `--swamp-type` ranges, with one change: every side
+// carries the same centred opening (`--exits`, default 8) instead of the exits the neighbours happen
+// to have, so two rooms built from it share a border tile for tile and the whole grid walks through.
+// A layout which comes out in several pieces is repaired rather than rerolled, so every layout
+// connects. The objects follow `room-gen`'s own placement rules off that terrain, so every source,
+// mineral and controller ends up on ground with room to work from -- `--sources` sets how many.
 //
-// Terrain is the only thing written: no room blob is rewritten and no object is read, moved or
-// deleted. The sources a wall landed next to are printed at the end instead, for the operator to
-// decide about. The terrain from before the first stamp is kept under `speedrun/terrainBackup`, which
-// `--restore` writes back; the template itself can be kept in a file with `--save` and stamped again
-// with `--template`.
+// Two stores are written, under the game mutex, and both are kept aside first:
 //
-// A running service holds its own copy of the world, so the written terrain is only served from the
-// next start; and the write itself is safest with the server stopped (`docker stop xxscreeps`),
-// which is also what `manage game pause` is for on a running one.
+//   - the terrain blob, under `speedrun/terrainBackup`;
+//   - the room blob of every room whose objects changed, under `speedrun/uniformRoomBackup`.
+//
+// `--restore` puts both back. The template itself can be kept in a file with `--save` and stamped
+// again with `--template`, which also keeps its object plan, so the same tiles come back.
+//
+// A running service holds its own copy of the terrain, so a written terrain is only served from the
+// next start; the rooms are written under the game mutex, so a running service picks those up on the
+// next tick. `docker stop xxscreeps` before the run makes both unambiguous.
 
 const usage = 'Usage: xxscreeps uniform-terrain [--shard shard] [--terrain-type 1-28] [--swamp-type 0-14]\n' +
-	'         [--exits 8] [--template file.json] [--save file.json] [--dry-run] [--restore]';
+	'         [--exits 8] [--sources 1-4] [--mineral H|O|Z|K|U|L|X] [--no-objects]\n' +
+	'         [--template file.json] [--save file.json] [--dry-run] [--restore]';
 
 const kDefaultExits = 8;
 
@@ -43,13 +49,15 @@ function parseExitWidth(value: string | undefined) {
 	return parsed;
 }
 
-/** A template file: the packed terrain, plus the layout which makes it readable in an editor. */
+/** A template file: the packed terrain, the layout which makes it readable in an editor, and the
+ * object plan the terrain was planned with. */
 interface TemplateFile {
 	terrain: number[];
 	layout: string[];
 	terrainType: number;
 	swampType: number;
 	exitWidth: number;
+	objects?: ObjectPlan;
 }
 
 function layoutOf(terrain: Readonly<Uint8Array>) {
@@ -65,7 +73,7 @@ async function readTemplate(file: string) {
 	if (!Array.isArray(parsed.terrain) || parsed.terrain.length !== 625) {
 		throw new Error(`${file} does not hold a template: the terrain entry has to be 625 packed bytes`);
 	}
-	return Uint8Array.from(parsed.terrain);
+	return { terrain: Uint8Array.from(parsed.terrain), plan: parsed.objects };
 }
 
 async function writeTemplate(file: string, report: UniformReport) {
@@ -75,8 +83,18 @@ async function writeTemplate(file: string, report: UniformReport) {
 		terrainType: report.terrainType,
 		swampType: report.swampType,
 		exitWidth: report.exitWidth,
+		...report.plan === undefined ? {} : { objects: report.plan },
 	};
 	await fs.writeFile(file, `${JSON.stringify(contents, null, 1)}\n`);
+}
+
+function loseLine(losses: UniformReport['lossesBefore']) {
+	const parts = [
+		losses.sources === 0 ? '' : `${losses.sources} source(s)`,
+		losses.minerals === 0 ? '' : `${losses.minerals} mineral(s)`,
+		losses.controllers === 0 ? '' : `${losses.controllers} controller(s)`,
+	].filter(part => part !== '');
+	return parts.length === 0 ? 'none' : parts.join(', ');
 }
 
 function describe(report: UniformReport) {
@@ -85,22 +103,46 @@ function describe(report: UniformReport) {
 			`${report.exitWidth} tile exits${report.generated ? '' : ' (from a file)'}` +
 			`${report.repaired ? `, repaired to connect after ${report.attempts} attempts` : ''}`,
 		`covered ${report.covered} rooms` +
-			`${report.ringFaces === 0 ? '' : `, opened ${report.ringFaces} highway ring faces`}` +
-			`${report.written ? ', terrain written' : ', nothing written'}`,
+			`${report.ringFaces === 0 ? '' : `, opened ${report.ringFaces} highway ring faces`}, ` +
+			`${report.written ? 'terrain written' : 'terrain already uniform'}`,
 	];
-	if (report.flagged.length === 0) {
-		lines.push('every object keeps open ground beside it');
+	if (report.sources === undefined) {
+		lines.push('objects left where they are (--no-objects)');
 	} else {
-		lines.push(`${report.lostSources} source(s) and ${report.lostOthers} other object(s) have no ` +
-			`open ground beside them: ${report.flagged.join(' ')}`);
+		const { moved, added, removed, nudged } = report.objects;
+		lines.push(
+			`objects: ${report.sources} source(s) per room` +
+				`${report.mineral === undefined ? '' : `, mineral ${report.mineral}`}, ` +
+				`one mineral and one controller; ${report.roomsWritten} room(s) rewritten` +
+				`${moved === 0 ? '' : `, ${moved} object(s) moved`}` +
+				`${added === 0 ? '' : `, ${added} added`}` +
+				`${removed === 0 ? '' : `, ${removed} removed`}`,
+		);
 	}
+	lines.push(`ground beside the objects, before: ${loseLine(report.lossesBefore)}; ` +
+		`after: ${loseLine(report.lossesAfter)}`);
+	if (report.objects.nudged !== 0) {
+		lines.push(`${report.objects.nudged} object(s) took the nearest free ground, their planned ` +
+			`tile being taken: ${report.nudgedRooms.join(' ')}`);
+	}
+	if (report.blockedRooms.length !== 0) {
+		lines.push(`${report.blockedRooms.length} room(s) had no ground to give an object: ` +
+			`${report.blockedRooms.join(' ')}`);
+	}
+	if (report.failedRooms.length !== 0) {
+		lines.push(`${report.failedRooms.length} room(s) could not be rewritten and were left alone: ` +
+			`${report.failedRooms.join(' ')}`);
+	}
+	lines.push(report.flagged.length === 0
+		? 'every source, mineral and controller has ground to work from'
+		: `still without ground beside them: ${report.flagged.join(' ')}`);
 	return lines.join('\n');
 }
 
 async function main() {
 	const argv = checkArguments({
 		argv: true,
-		boolean: [ 'dry-run', 'restore' ] as const,
+		boolean: [ 'dry-run', 'restore', 'no-objects' ] as const,
 		string: [ 'shard', 'exits', 'template', 'save', 'terrain-type', 'swamp-type', 'sources', 'mineral' ] as const,
 	});
 	if (argv.argv.length !== 0) {
@@ -111,18 +153,22 @@ async function main() {
 	}
 	const exits = parseExitWidth(argv.exits);
 	const options = parseRoomOptions(argv);
-	if (options.sources !== undefined || options.mineral !== undefined) {
-		throw new Error('--sources and --mineral do not apply here: rooms keep their own objects, ' +
-			'so this command only writes terrain');
+	// `parseRoomOptions` types a mineral as a resource or `false` (its "no mineral" flag, which the
+	// command line can't ask for); narrow it so an unset one stays out of the request entirely.
+	const mineral = options.mineral === false ? undefined : options.mineral;
+	const file = argv.template === undefined ? undefined : await readTemplate(argv.template);
+	if (file?.plan !== undefined && options.sources !== undefined && options.sources !== file.plan.sources.length) {
+		throw new Error(`${argv.template} holds a plan for ${file.plan.sources.length} source(s); ` +
+			'drop --sources or match it, or the tiles would not line up');
 	}
 
 	await using db = await Database.connect();
 	await using shard = await Shard.connect(db, argv.shard ?? config.shards[0]!.name);
 	if (argv.restore) {
-		const restored = await restoreTerrain(shard);
+		const restored = await restoreUniform(shard);
 		await Promise.all([ db.save(), shard.save() ]);
-		console.log(restored
-			? 'Put the terrain back the way it was before the first stamp'
+		console.log(restored.terrain
+			? `Put the terrain and ${restored.rooms} room(s) back the way they were before the first stamp`
 			: 'Nothing to restore: no terrain under `speedrun/terrainBackup`');
 		return;
 	}
@@ -133,7 +179,11 @@ async function main() {
 		...options.terrainType === undefined ? {} : { terrainType: options.terrainType },
 		...options.swampType === undefined ? {} : { swampType: options.swampType },
 		exitWidth: exits,
-		...argv.template === undefined ? {} : { template: await readTemplate(argv.template) },
+		...argv.template === undefined ? {} : { template: file!.terrain },
+		...file?.plan === undefined ? {} : { plan: file.plan },
+		...options.sources === undefined ? {} : { sources: options.sources },
+		...mineral === undefined ? {} : { mineral },
+		...argv['no-objects'] ? { objects: false } : {},
 	}, { dryRun: argv['dry-run'] });
 	await Promise.all([ db.save(), shard.save() ]);
 	console.log(describe(report));
@@ -141,8 +191,9 @@ async function main() {
 		await writeTemplate(argv.save, report);
 		console.log(`Template written to ${argv.save}`);
 	}
-	if (report.written) {
-		console.log('Restart the server to serve the new terrain; `--restore` puts the old one back.');
+	if (report.written || report.roomsWritten !== 0) {
+		console.log('Restart the server to serve the new terrain; the rooms are read on their next ' +
+			'tick, and `--restore` puts both back.');
 		if (report.generated) {
 			console.log('Another run rolls a new terrain of the same layout; `--save` and `--template` keep one exactly.');
 		}

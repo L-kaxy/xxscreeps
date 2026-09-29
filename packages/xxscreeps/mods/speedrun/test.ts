@@ -33,8 +33,8 @@ import {
 	readPlayerBrackets, readPlayerRecords, readRacing, runKey, scoreKey, startRun,
 } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
-import { applyUniform, generateTemplate, isUniform, templateExitWidth, templateExits, uniformLayout } from './template.js';
-import { applyUniformTerrain, restoreTerrain } from './uniform.js';
+import { applyUniform, generateTemplate, hasStandingRoom, isUniform, objectPlan, templateExitWidth, templateExits, uniformLayout } from './template.js';
+import { applyUniformTerrain, restoreUniform } from './uniform.js';
 import { isSolid, wallSectorCores } from './walls.js';
 
 // `W7N7` has exits in all four directions and all of them lead to uncontrolled rooms — the same
@@ -1157,11 +1157,17 @@ describe('uniform rooms', () => {
 		const core = new Set(sectorCoreRooms(before.terrain));
 		assert.ok(members.size > 9, 'the test world carries a sector');
 
-		assert.strictEqual(await restoreTerrain(shard), false, 'there is nothing to restore yet');
+		assert.strictEqual((await restoreUniform(shard)).terrain, false, 'there is nothing to restore yet');
 
 		const dry = await applyUniformTerrain(shard, { terrainType: 1, swampType: 0, exitWidth: 8 }, { dryRun: true });
 		assert.strictEqual(dry.written, false, 'a dry run writes nothing');
+		assert.strictEqual(dry.roomsWritten, 0, 'and rewrites no room');
 		assert.strictEqual(dry.covered, members.size - core.size, 'and still counts the rooms it would cover');
+		assert.strictEqual(
+			dry.lossesAfter.sources + dry.lossesAfter.minerals + dry.lossesAfter.controllers,
+			0,
+			'and reports what a run would leave behind',
+		);
 		assert.deepStrictEqual([ ...(await shard.data.get('terrain', { blob: true }))! ], original, 'the blob is untouched');
 		assert.strictEqual(await shard.data.get('speedrun/terrainBackup', { blob: true }), null, 'and no backup was taken');
 
@@ -1169,6 +1175,13 @@ describe('uniform rooms', () => {
 		assert.strictEqual(report.written, true, 'the stamp was written');
 		assert.strictEqual(report.covered, members.size - core.size, 'every room of the interior but the core');
 		assert.ok(report.ringFaces > 0, 'and the highway ring faces which look at one of them');
+		assert.ok(report.roomsWritten > 0, 'every covered room was given the plan\'s objects');
+		assert.strictEqual(
+			report.lossesAfter.sources + report.lossesAfter.minerals + report.lossesAfter.controllers,
+			0,
+			'no object is left without ground beside it',
+		);
+		assert.deepStrictEqual(report.flagged, [], 'so no room is flagged');
 		assert.notDeepStrictEqual([ ...(await shard.data.get('terrain', { blob: true }))! ], original, 'a new terrain was written');
 
 		// The world now holds it: covered rooms carry the template, bar the face a room keeps shut at
@@ -1203,11 +1216,36 @@ describe('uniform rooms', () => {
 		const again = await applyUniformTerrain(shard, { terrainType: 1, swampType: 0, exitWidth: 8, template: report.terrain });
 		assert.strictEqual(again.written, false, 'the same template twice writes nothing');
 		assert.strictEqual(again.generated, false, 'a template handed in is stamped as it is');
+		assert.ok(
+			again.roomsWritten <= report.nudgedRooms.length + report.blockedRooms.length,
+			'the same template twice rewrites no room whose planned tile was free',
+		);
 
-		// The rollback the command offers.
-		assert.strictEqual(await restoreTerrain(shard), true, 'the backup goes back');
+		// The rollback the command offers, terrain and rooms together.
+		const restored = await restoreUniform(shard);
+		assert.strictEqual(restored.terrain, true, 'the backup goes back');
+		assert.strictEqual(restored.rooms, report.roomsWritten, 'and so does every room which was rewritten');
 		assert.deepStrictEqual([ ...(await shard.data.get('terrain', { blob: true }))! ], original, 'and the world with it');
 	}));
+
+	test('a template plans the same objects for every room, on ground with room to work', () => {
+		for (const terrainType of [ 1, 20 ]) {
+			const { terrain } = generateTemplate({ ...spec, terrainType });
+			for (const sources of [ 1, 2, 4 ]) {
+				const plan = objectPlan(terrain, sources);
+				assert.strictEqual(plan.sources.length, sources, `layout ${terrainType} plans ${sources} source(s)`);
+				const tiles = [ ...plan.sources, plan.mineral, plan.controller ];
+				assert.strictEqual(new Set(tiles.map(tile => `${tile.x},${tile.y}`)).size, tiles.length, 'no two objects share a tile');
+				for (const tile of tiles) {
+					const index = tile.y * 50 + tile.x;
+					const mask = (terrain[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03;
+					assert.notStrictEqual(mask, TERRAIN_MASK_WALL, `${tile.x},${tile.y} stands on ground`);
+					assert.strictEqual(hasStandingRoom(terrain, tile.x, tile.y), true, `${tile.x},${tile.y} has ground beside it`);
+				}
+				assert.deepStrictEqual(objectPlan(terrain, sources), plan, 'the same template plans the same tiles');
+			}
+		}
+	});
 
 	test('a generated template opens all four sides the same way', () => {
 		for (const terrainType of [ 1, 2, 28 ]) {
