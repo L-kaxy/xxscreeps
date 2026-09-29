@@ -777,12 +777,16 @@ interface PlanBox {
 }
 
 /**
- * Spacings tried in turn until one fits, in tiles. Sources follow `room-gen`'s own spread rule
- * (fourteen apart when the terrain allows), the mineral and the controller use the smaller range
- * `room-gen` gives them; the last values are the fallback which fits in any room with ground.
+ * `room-gen`'s own placement constants, kept as they are there: sources stay this far apart once a
+ * room carries three of them, the threshold is jittered off the widest gap the layout has
+ * (`min` over the anchors, then `max(kMinSpreadSpacing, best * kSpreadJitter)`), and the mineral
+ * keeps `5` tiles from every source and the controller.
  */
-const kSourceSpacings = [ 14, 11, 8, 6, 4, 3, 2, 1 ];
-const kStationSpacings = [ 5, 4, 3, 2, 1 ];
+const kSpreadSourceThreshold = 3;
+const kMinSpreadSpacing = 14;
+const kSpreadJitter = 0.7;
+/** The mineral asks for five tiles of separation; a template has no room to reroll, so it relaxes. */
+const kMineralSeparation = [ 5, 4, 3, 2, 1 ];
 
 function terrainAt(template: Readonly<Uint8Array>, xx: number, yy: number) {
 	const index = yy * kGridSize + xx;
@@ -830,10 +834,36 @@ function tileDistance(left: PlanTile, right: PlanTile) {
 	return Math.max(Math.abs(left.x - right.x), Math.abs(left.y - right.y));
 }
 
-/** The first tile in `order` at least `spacing` away from every tile already taken. */
-function pickTile(order: readonly PlanTile[], taken: readonly PlanTile[], spacing: number) {
-	return order.find(tile =>
-		taken.every(other => tileDistance(other, tile) >= spacing));
+/** How far the nearest of `anchors` is from `tile`, in tiles. */
+function nearestAnchor(tile: PlanTile, anchors: readonly PlanTile[]) {
+	return anchors.reduce((near, anchor) => Math.min(near, tileDistance(anchor, tile)), Infinity);
+}
+
+/**
+ * `room-gen`'s `findRandomPosition`: the first tile in pseudo-random order which nothing has taken
+ * yet -- the tagging the generator does around every placement, which is what keeps two objects off
+ * one tile.
+ */
+function pickRandom(order: readonly PlanTile[], taken: readonly PlanTile[]) {
+	return order.find(tile => taken.every(other => tileDistance(other, tile) >= 1));
+}
+
+/**
+ * `room-gen`'s `findSpreadPosition`: the threshold is `max(14, 0.7 * the widest gap any candidate
+ * has)`, and a candidate nearer than fourteen to its closest anchor makes the generator throw the
+ * room away and build it on fresh terrain. A template has no second terrain to try, so a layout
+ * which cannot keep fourteen tiles is taken at the widest gap it does have rather than refused.
+ */
+function pickSpread(order: readonly PlanTile[], anchors: readonly PlanTile[]) {
+	const gaps = order.map(tile => ({ tile, nearest: nearestAnchor(tile, anchors) }));
+	const best = Math.max(0, ...gaps.map(gap => gap.nearest));
+	if (best === 0) {
+		return undefined;
+	}
+	const threshold = Math.max(kMinSpreadSpacing, best * kSpreadJitter);
+	return (best >= kMinSpreadSpacing
+		? gaps.find(gap => gap.nearest >= threshold)
+		: gaps.find(gap => gap.nearest === best))?.tile;
 }
 
 /** A seed which reads off the template, so one template always plans one set of tiles. */
@@ -846,52 +876,67 @@ function planSeed(template: Readonly<Uint8Array>, sources: number) {
 }
 
 /**
- * The objects every covered room is given, planned off the terrain: each source, the mineral and the
- * controller on ground with standing room beside it, all of them the same tiles in every room.
+ * The objects every covered room is given, placed the way `room-gen` places them and in its order:
+ * the sources, then the controller anywhere in its own box, then the mineral clear of both.
  *
- * Planned on the terrain alone, like `room-gen`'s own generator: what a room already holds is not
- * consulted, so a room whose source sat in a corner gets the template's layout like every other. A
- * layout the spacing can't fit -- a wall layout with almost no ground left -- throws rather than
- * quietly dropping an object.
+ * Planned on the terrain alone, like the generator: what a room already holds is not consulted, so a
+ * room whose source sat in a corner gets the template's layout like every other. A layout with no
+ * ground left for an object throws rather than quietly dropping one.
  */
 export function objectPlan(
 	template: Readonly<Uint8Array>,
 	sources: number,
 	seed = planSeed(template, sources),
 ): ObjectPlan {
-	const orders = new Map<PlanBox, PlanTile[]>();
-	const orderFor = (box: PlanBox) => {
-		let order = orders.get(box);
+	// Each pass shuffles its own box, the way each generator rolls its own positions.
+	const orders = new Map<number, PlanTile[]>();
+	const orderFor = (box: PlanBox, round: number) => {
+		let order = orders.get(round);
 		if (order === undefined) {
-			orders.set(box, order = [ ...shuffle(planTiles(template, box), seed) ]);
+			orders.set(round, order = [ ...shuffle(planTiles(template, box), hashCombine(seed, round)) ]);
 		}
 		return order;
 	};
-	const spread = (count: number, spacings: readonly number[], anchors: readonly PlanTile[], box: PlanBox) => {
-		const order = orderFor(box);
-		for (const spacing of spacings) {
-			const tiles: PlanTile[] = [ ...anchors ];
-			while (tiles.length < anchors.length + count) {
-				const tile = pickTile(order, tiles, spacing);
-				if (tile === undefined) {
-					break;
-				}
-				tiles.push(tile);
-			}
-			if (tiles.length === anchors.length + count) {
-				return tiles.slice(anchors.length);
-			}
+
+	// Sources: `room-gen` drops the first one anywhere and only spreads a room once it carries three
+	// of them, so a room of one or two keeps whatever it lands on.
+	const sourceOrder = orderFor(kBoxes.source, 1);
+	const sourceTiles: PlanTile[] = [];
+	while (sourceTiles.length < sources) {
+		const tile = sources >= kSpreadSourceThreshold && sourceTiles.length > 0
+			? pickSpread(sourceOrder, sourceTiles)
+			: pickRandom(sourceOrder, sourceTiles);
+		if (tile === undefined) {
+			break;
 		}
-		return undefined;
-	};
-	const sourceTiles = spread(sources, kSourceSpacings, [], kBoxes.source);
-	if (sourceTiles === undefined || sourceTiles.length !== sources) {
+		sourceTiles.push(tile);
+	}
+	if (sourceTiles.length !== sources) {
 		throw new Error(`this layout leaves no ground for ${sources} source(s); pick a lighter terrain-type`);
 	}
-	const controller = spread(1, kStationSpacings, sourceTiles, kBoxes.controller)?.[0];
-	const mineral = spread(1, kStationSpacings, controller === undefined ? sourceTiles : [ ...sourceTiles, controller ], kBoxes.mineral)?.[0];
-	if (controller === undefined || mineral === undefined) {
-		throw new Error('this layout leaves no ground for a mineral and a controller; pick a lighter terrain-type');
+
+	// The controller: any tile of its own box which nothing has taken.
+	const controller = pickRandom(orderFor(kBoxes.controller, 2), sourceTiles);
+	if (controller === undefined) {
+		throw new Error('this layout leaves no ground for a controller; pick a lighter terrain-type');
+	}
+
+	// The mineral: five tiles clear of every source and the controller, and with three or more sources
+	// spread off them the same way the generator spreads a third source.
+	const mineralOrder = orderFor(kBoxes.mineral, 3);
+	const anchors = [ ...sourceTiles, controller ];
+	const mineral = kMineralSeparation
+		.map(separation => {
+			const eligible = mineralOrder
+				.filter(tile => anchors.every(anchor => tileDistance(anchor, tile) >= separation));
+			if (eligible.length === 0) {
+				return undefined;
+			}
+			return sources >= kSpreadSourceThreshold ? pickSpread(eligible, sourceTiles) : eligible[0];
+		})
+		.find(tile => tile !== undefined);
+	if (mineral === undefined) {
+		throw new Error('this layout leaves no ground for a mineral; pick a lighter terrain-type');
 	}
 	return { sources: sourceTiles, mineral, controller };
 }
