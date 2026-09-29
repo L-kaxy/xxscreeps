@@ -63,6 +63,17 @@ async function handleServiceMessage(message: ServiceMessage) {
 			paused = false;
 			break;
 
+		// Fork: hand the reload to the two services which hold terrain. They apply it at the top of
+		// the next tick, so nothing is swapped out from under a tick in progress, and a paused
+		// game picks it up when it resumes. The backend listens for the message itself.
+		case 'reloadTerrain':
+			await Promise.all([
+				processorChannel.publish({ type: 'reloadTerrain' }),
+				runnerChannel.publish({ type: 'reloadTerrain' }),
+			]);
+			console.log('Terrain reload requested');
+			break;
+
 		case 'processorConnected':
 			await serviceChannel.publish({ type: 'mainConnected' });
 			break;

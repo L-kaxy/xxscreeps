@@ -71,7 +71,8 @@ export async function makeTickPayloadForTesting(shard: Shard, world: World, user
 
 export class PlayerInstance {
 	readonly shard;
-	readonly world;
+	// Fork: swapped by `reloadTerrain` so a terrain edit reaches player code without a restart.
+	world;
 	readonly userId;
 	readonly username;
 	private bucket = config.runner.cpu.bucket;
@@ -167,6 +168,14 @@ export class PlayerInstance {
 		this.codeChannel.disconnect();
 		mustNotReject(this.sandbox?.dispose());
 		this.cleanup();
+	}
+
+	/** @internal Fork: give the sandbox the new terrain. It is rebuilt from it on the next tick --
+	 * the same thing a restart does -- so player code and `Room.Terrain` see the terrain the engine
+	 * generated from, without losing the tick. Memory and CPU bucket are untouched. */
+	reloadTerrain(world: World) {
+		this.world = world;
+		this.reset();
 	}
 
 	async run(this: PlayerInstance, time: number, visibleRooms: string[], intentRooms: string[]) {

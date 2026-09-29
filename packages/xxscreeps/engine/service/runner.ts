@@ -44,8 +44,10 @@ const maxConcurrency = config.runner.sandbox === 'unsafe' ? 1 : config.runner.co
 const { migrationTimeout } = config.runner;
 
 // Load shared terrain data
-const world = await shard.loadWorld();
+// Fork: `reloadTerrain` replaces this and re-seeds the pathfinder.
+let world = await shard.loadWorld();
 loadTerrain(world); // pathfinder
+let reloadTerrain = false;
 
 // Shared worker context
 await using runner = await acquireRunnerContext(shard);
@@ -64,9 +66,24 @@ loop: for await (const message of Async.breakable(runnerMessages, breaker => bre
 		case 'shutdown':
 			break loop;
 
+		// Fork: defer the reload to the top of the next tick, so no sandbox is disposed while it is
+		// running.
+		case 'reloadTerrain':
+			reloadTerrain = true;
+			break;
+
 		case 'run': {
 			// Set up metadata and iterators for this tick
 			const { time } = message;
+			if (reloadTerrain) {
+				reloadTerrain = false;
+				world = await shard.loadWorld();
+				loadTerrain(world);
+				for (const instance of playerInstances.values()) {
+					instance.reloadTerrain(world);
+				}
+				console.log('Terrain reloaded, player sandboxes rebuilt');
+			}
 			if (isEntry) {
 				process.stderr.write(`Tick ${time}: `);
 			}

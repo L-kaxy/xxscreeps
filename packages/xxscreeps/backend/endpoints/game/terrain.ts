@@ -4,15 +4,25 @@ import makeEtag from 'etag';
 import { hooks, makeValidatedPayloadRoute, makeValidatedQueryRoute } from 'xxscreeps/backend/index.js';
 import { Fn } from 'xxscreeps/functional/fn.js';
 
-const cache = new Map<string, {
+interface TerrainPayload {
 	_id: string;
 	room: string;
 	terrain: string;
 	type: 'terrain';
-}>();
+}
+
+// Fork: keyed by the `World` object rather than by room name alone -- upstream never changes terrain
+// at runtime, but we do, and a reload hands every request a new `World`, so the stale payloads fall
+// out of reach instead of being served forever.
+const cache = new WeakMap<World, Map<string, TerrainPayload>>();
 
 function getTerrainPayload(world: World, roomName: string) {
-	const cached = cache.get(roomName);
+	let rooms = cache.get(world);
+	if (rooms === undefined) {
+		rooms = new Map();
+		cache.set(world, rooms);
+	}
+	const cached = rooms.get(roomName);
 	if (cached) {
 		return cached;
 	}
@@ -26,13 +36,13 @@ function getTerrainPayload(world: World, roomName: string) {
 			terrainString += terrain.get(xx, yy);
 		}
 	}
-	const payload = {
+	const payload: TerrainPayload = {
 		_id: roomName,
 		room: roomName,
 		terrain: terrainString,
-		type: 'terrain' as const,
+		type: 'terrain',
 	};
-	cache.set(roomName, payload);
+	rooms.set(roomName, payload);
 	return payload;
 }
 

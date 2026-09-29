@@ -154,7 +154,9 @@ function generate(map: GameMap, grid: (Room | null)[][], zoom: number) {
 }
 
 function register(paths: string[], fn: (shard: Shard, map: GameMap, room: string) => Promise<Buffer | null>) {
-	const cache = new Map<string, { etag: string; payload: Buffer | null }>();
+	// Fork: keyed by the `GameMap` the tiles were drawn from rather than by room name alone, so a
+	// terrain reload (which swaps the `World` out) redraws them. Upstream never replaces the world.
+	const caches = new WeakMap<GameMap, Map<string, { etag: string; payload: Buffer | null }>>();
 	for (const path of paths) {
 		hooks.register('route', {
 			path,
@@ -162,8 +164,14 @@ function register(paths: string[], fn: (shard: Shard, map: GameMap, room: string
 			async execute(context) {
 				// Fetch PNG from cache, or generate fresh
 				const room = context.params.room!;
+				const map = context.backend.world.map;
+				const cache = caches.get(map) ?? function() {
+					const cache = new Map<string, { etag: string; payload: Buffer | null }>();
+					caches.set(map, cache);
+					return cache;
+				}();
 				const data = cache.get(room) ?? await async function() {
-					const payload = await fn(context.shard, context.backend.world.map, room);
+					const payload = await fn(context.shard, map, room);
 					if (payload === null) {
 						return { etag: 'nothing', payload: null };
 					} else {

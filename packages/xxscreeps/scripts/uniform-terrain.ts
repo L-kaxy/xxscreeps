@@ -4,6 +4,7 @@ import * as fs from 'node:fs/promises';
 import { checkArguments } from 'xxscreeps/config/arguments.js';
 import { config } from 'xxscreeps/config/index.js';
 import { Database, Shard } from 'xxscreeps/engine/db/index.js';
+import { getServiceChannel } from 'xxscreeps/engine/service/index.js';
 import { applyUniformTerrain, restoreUniform } from 'xxscreeps/mods/speedrun/uniform.js';
 import { parseRoomOptions } from 'xxscreeps/scripts/generate-room.js';
 
@@ -28,17 +29,22 @@ import { parseRoomOptions } from 'xxscreeps/scripts/generate-room.js';
 // `--restore` puts both back. The template itself can be kept in a file with `--save` and stamped
 // again with `--template`, which also keeps its object plan, so the same tiles come back.
 //
-// A running service holds its own copy of the terrain, so a written terrain is only served from the
-// next start; the rooms are read from storage every time a room is processed. Which storage that is
-// matters: run from a second container and this process keeps its own copy of the data directory,
-// which the running engine writes its in-memory rooms back over every couple of minutes -- so the
-// terrain would take and the objects would not. `docker stop xxscreeps` before the run, or run the
-// command inside the container (`docker exec -i xxscreeps …`), where it shares the engine's store.
-// The command says which side it is on (`storage: sibling` or `storage: files`).
+// A running service holds its own copy of the terrain, so a written terrain is only served once
+// every service has re-read it: run from the running container (a sibling of the engine, sharing its
+// store) and this command asks them to with the `reloadTerrain` service message -- no restart. Run
+// from a second container and it has its own copy of the data directory, which the running engine
+// writes its in-memory rooms back over every couple of minutes -- so the terrain would take and the
+// objects would not, and only a restart would serve either. `docker stop xxscreeps` before such a
+// run, or run it inside the container (`docker exec -i xxscreeps …`). The command says which side it
+// is on (`storage: sibling` or `storage: files`).
+//
+// Whatever the store, the rooms are the fragile half: a running tick holds the rooms it loaded in
+// memory and saves them back, so an object change made underneath it is undone. `--no-reload` skips
+// the message, for the case where the server is being restarted anyway.
 
 const usage = 'Usage: xxscreeps uniform-terrain [--shard shard] [--terrain-type 1-28] [--swamp-type 0-14]\n' +
 	'         [--exits 8] [--sources 1-4] [--mineral H|O|Z|K|U|L|X] [--no-objects]\n' +
-	'         [--template file.json] [--save file.json] [--dry-run] [--restore]';
+	'         [--template file.json] [--save file.json] [--dry-run] [--restore] [--no-reload]';
 
 const kDefaultExits = 8;
 
@@ -167,7 +173,7 @@ async function storageMode() {
 async function main() {
 	const argv = checkArguments({
 		argv: true,
-		boolean: [ 'dry-run', 'restore', 'no-objects' ] as const,
+		boolean: [ 'dry-run', 'restore', 'no-objects', 'no-reload' ] as const,
 		string: [ 'shard', 'exits', 'template', 'save', 'terrain-type', 'swamp-type', 'sources', 'mineral' ] as const,
 	});
 	if (argv.argv.length !== 0) {
@@ -201,6 +207,10 @@ async function main() {
 		console.log(restored.terrain
 			? `Put the terrain and ${restored.rooms} room(s) back the way they were before the first stamp`
 			: 'Nothing to restore: no terrain under `speedrun/terrainBackup`');
+		if (restored.terrain && storage === 'sibling' && !argv['no-reload']) {
+			await getServiceChannel(shard).publish({ type: 'reloadTerrain' });
+			console.log('Asked the running server to re-read the terrain.');
+		}
 		return;
 	}
 
@@ -223,8 +233,17 @@ async function main() {
 		console.log(`Template written to ${argv.save}`);
 	}
 	if (report.written || report.roomsWritten !== 0) {
-		console.log('Restart the server to serve the new terrain; the rooms are read on their next ' +
-			'tick, and `--restore` puts both back.');
+		if (storage === 'sibling' && !argv['no-reload']) {
+			// The services are up and share this process's store, so the terrain just written is the
+			// one they would read: ask them to read it rather than asking for a restart.
+			await getServiceChannel(shard).publish({ type: 'reloadTerrain' });
+			console.log('Asked the running server to re-read the terrain: it serves it from the next ' +
+				'tick, no restart. The rooms are the other half of that and a running tick saves back ' +
+				'the rooms it holds in memory, so an object change needs the server stopped.');
+		} else {
+			console.log('Restart the server to serve the new terrain; the rooms are read on their next ' +
+				'tick, and `--restore` puts both back.');
+		}
 		if (report.generated) {
 			console.log('Another run rolls a new terrain of the same layout; `--save` and `--template` keep one exactly.');
 		}

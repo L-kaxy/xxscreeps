@@ -33,8 +33,9 @@ using signal = handleInterruptSignal(() => {
 await using db = await Database.connect();
 await using shard = await Shard.connect(db, config.shards[0]!.name);
 await using disposable = new AsyncDisposableStack();
-const world = await shard.loadWorld();
-const { terrainBlob } = world;
+// Fork: `reloadTerrain` replaces this, so it is not const; the workers each hold their own copy of
+// the terrain built from this blob.
+let world = await shard.loadWorld();
 const processorSubscription = disposable.adopt(
 	await getProcessorChannel(shard).subscribe(),
 	subscription => subscription.disconnect());
@@ -112,9 +113,18 @@ async function *consumeRoomsQueue(worker: RoomWorker, time: number): AsyncIterab
 	}
 }
 
+// Fork: hand the current terrain to every worker. A `reloadTerrain` re-runs this with a fresh blob
+// at the top of the next tick, so no room is processed against two different worlds.
+let reloadTerrain = false;
+async function sendTerrainToWorkers() {
+	await Promise.all(Fn.map(workers, async worker => {
+		await worker.responder({ type: 'world', terrainBlob: world.terrainBlob });
+	}));
+}
+
 // Initialize workers and rooms
 await Fn.mapAwait(workers, async worker => {
-	await worker.responder({ type: 'world', terrainBlob });
+	await worker.responder({ type: 'world', terrainBlob: world.terrainBlob });
 	for await (const roomName of consumeSet(shard.scratch, 'initializeRooms')) {
 		await worker.responder({ type: 'initialize', roomName });
 		if (halted) {
@@ -131,8 +141,19 @@ loop: for await (const message of Async.breakable(processorMessages, breaker => 
 		case 'shutdown':
 			break loop;
 
+		// Fork: defer the reload to the top of the next tick (see `case 'process'`).
+		case 'reloadTerrain':
+			reloadTerrain = true;
+			break;
+
 		case 'process': {
 			const { time, roomNames } = message;
+			if (reloadTerrain) {
+				reloadTerrain = false;
+				world = await shard.loadWorld();
+				await sendTerrainToWorkers();
+				console.log('Terrain reloaded');
+			}
 			processing = true;
 
 			// Update checkAffinity flag on workers
