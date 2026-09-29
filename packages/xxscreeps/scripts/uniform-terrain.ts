@@ -29,8 +29,12 @@ import { parseRoomOptions } from 'xxscreeps/scripts/generate-room.js';
 // again with `--template`, which also keeps its object plan, so the same tiles come back.
 //
 // A running service holds its own copy of the terrain, so a written terrain is only served from the
-// next start; the rooms are written under the game mutex, so a running service picks those up on the
-// next tick. `docker stop xxscreeps` before the run makes both unambiguous.
+// next start; the rooms are read from storage every time a room is processed. Which storage that is
+// matters: run from a second container and this process keeps its own copy of the data directory,
+// which the running engine writes its in-memory rooms back over every couple of minutes -- so the
+// terrain would take and the objects would not. `docker stop xxscreeps` before the run, or run the
+// command inside the container (`docker exec -i xxscreeps …`), where it shares the engine's store.
+// The command says which side it is on (`storage: sibling` or `storage: files`).
 
 const usage = 'Usage: xxscreeps uniform-terrain [--shard shard] [--terrain-type 1-28] [--swamp-type 0-14]\n' +
 	'         [--exits 8] [--sources 1-4] [--mineral H|O|Z|K|U|L|X] [--no-objects]\n' +
@@ -139,6 +143,27 @@ function describe(report: UniformReport) {
 	return lines.join('\n');
 }
 
+/**
+ * Which store this process is writing: the one the running engine holds, or its own copy of the data
+ * directory.
+ *
+ * The local provider either connects a process to whatever host already holds the storage -- a
+ * sibling, which sees the engine's live data -- or makes it a host of its own over the files. A
+ * server which is running keeps its rooms in memory and flushes them back over those files every
+ * `saveInterval` (two minutes by default), so a room written on the wrong side of that line is
+ * overwritten before anyone is served it: an operator running this from a second container sees the
+ * terrain take (the engine reads that blob once, at boot, and never writes it back) and none of the
+ * objects. Hence the warning below, and the note in the usage.
+ */
+async function storageMode() {
+	try {
+		const { isSiblingProcess } = await import('xxscreeps/engine/db/storage/local/responder.js');
+		return await isSiblingProcess() ? 'sibling' : 'files';
+	} catch {
+		return 'unknown';
+	}
+}
+
 async function main() {
 	const argv = checkArguments({
 		argv: true,
@@ -164,6 +189,12 @@ async function main() {
 
 	await using db = await Database.connect();
 	await using shard = await Shard.connect(db, argv.shard ?? config.shards[0]!.name);
+	const storage = await storageMode();
+	if (storage === 'files') {
+		console.log('This process has its own copy of the data directory rather than the running ' +
+			'engine\'s store. If a server is up, stop it first: it keeps its rooms in memory and ' +
+			'writes them back over the files, so the object half of the stamp would be undone.');
+	}
 	if (argv.restore) {
 		const restored = await restoreUniform(shard);
 		await Promise.all([ db.save(), shard.save() ]);
@@ -186,7 +217,7 @@ async function main() {
 		...argv['no-objects'] ? { objects: false } : {},
 	}, { dryRun: argv['dry-run'] });
 	await Promise.all([ db.save(), shard.save() ]);
-	console.log(describe(report));
+	console.log(`${describe(report)}\nstorage: ${storage}`);
 	if (argv.save !== undefined) {
 		await writeTemplate(argv.save, report);
 		console.log(`Template written to ${argv.save}`);
