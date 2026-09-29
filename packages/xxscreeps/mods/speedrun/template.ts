@@ -2,6 +2,8 @@ import type { Terrain } from 'xxscreeps/game/terrain.js';
 import type { SectorControl } from 'xxscreeps/mods/modern/sector/schema.js';
 import { makeSignedRoomName, parseSignedRoomName } from 'xxscreeps/game/room/name.js';
 import { TERRAIN_MASK_SWAMP, TERRAIN_MASK_WALL, getBuffer, isBorder, packExits } from 'xxscreeps/game/terrain.js';
+import { shuffle } from 'xxscreeps/utility/random.js';
+import { hashCombine } from 'xxscreeps/utility/utility.js';
 
 /**
  * One room template, stamped over every room of a sector's interior.
@@ -20,9 +22,9 @@ import { TERRAIN_MASK_SWAMP, TERRAIN_MASK_WALL, getBuffer, isBorder, packExits }
  *     region and its stray pockets walled off -- the repair the deterministic highway path of
  *     `room-gen` already uses.
  *
- * Terrain is the only thing written. A room keeps whatever sources, minerals and controllers it has,
- * wherever they are -- which is why the caller reports the ones a wall landed on rather than moving
- * them: only the operator can decide what to do about those.
+ * A template also plans the objects a room carries: `objectPlan` picks the tiles the sources, the
+ * mineral and the controller go on, off the finished terrain rather than off a room's existing
+ * layout, so every covered room reads the same and none of them sits where a wall shut it in.
  */
 
 interface TerrainTypeParams {
@@ -726,4 +728,130 @@ export function hasStandingRoom(template: Readonly<Uint8Array>, xx: number, yy: 
 		}
 	}
 	return false;
+}
+
+// --- the objects every covered room carries ---------------------------------
+
+/** One tile in room coordinates. The same tile is used in every covered room. */
+export interface PlanTile {
+	x: number;
+	y: number;
+}
+
+/**
+ * Where a covered room's objects go. A plan is a function of the template it was planned from, so
+ * stamping the same template twice plans the same tiles -- which is what makes the object pass
+ * idempotent -- and a saved template can be stamped again weeks later on the same tiles.
+ */
+export interface ObjectPlan {
+	/** One tile per source; the count is the operator's `--sources` (default 2). */
+	sources: PlanTile[];
+	mineral: PlanTile;
+	controller: PlanTile;
+}
+
+/** How many sources a covered room is given when the operator doesn't say. */
+export const kDefaultSources = 2;
+
+/**
+ * Plans keep this far from the border. A covered room which looks at a core keeps that whole face
+ * walled; no face is nearer the border than the outer ring of tiles, so this alone keeps a planned
+ * object off a sealed face.
+ */
+const kPlanMargin = 3;
+
+/**
+ * Spacings tried in turn until one fits, in tiles. Sources follow `room-gen`'s own spread rule
+ * (fourteen apart when the terrain allows), the mineral and the controller use the smaller range
+ * `room-gen` gives them; the last values are the fallback which fits in any room with ground.
+ */
+const kSourceSpacings = [ 14, 11, 8, 6, 4, 3, 2, 1 ];
+const kStationSpacings = [ 5, 4, 3, 2, 1 ];
+
+function terrainAt(template: Readonly<Uint8Array>, xx: number, yy: number) {
+	const index = yy * kGridSize + xx;
+	return (template[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03;
+}
+
+/**
+ * Every tile of the template a planned object may stand on: walkable ground inside the margin with
+ * walkable ground beside it to work from, plain before swamp. Unlike a payload marker -- which is
+ * written into the terrain and reads back as a wall -- a planned object simply stands on its tile,
+ * so the tile itself has to be ground a creep could otherwise have walked over.
+ */
+export function planTiles(template: Readonly<Uint8Array>): PlanTile[] {
+	const plain: PlanTile[] = [];
+	const swamp: PlanTile[] = [];
+	const last = kGridSize - kPlanMargin - 1;
+	for (let yy = kPlanMargin; yy <= last; ++yy) {
+		for (let xx = kPlanMargin; xx <= last; ++xx) {
+			const terrain = terrainAt(template, xx, yy);
+			if (terrain !== TERRAIN_MASK_WALL && hasStandingRoom(template, xx, yy)) {
+				(terrain === TERRAIN_MASK_SWAMP ? swamp : plain).push({ x: xx, y: yy });
+			}
+		}
+	}
+	return [ ...plain, ...swamp ];
+}
+
+function tileDistance(left: PlanTile, right: PlanTile) {
+	return Math.max(Math.abs(left.x - right.x), Math.abs(left.y - right.y));
+}
+
+/** The first tile in `order` at least `spacing` away from every tile already taken. */
+function pickTile(order: readonly PlanTile[], taken: readonly PlanTile[], spacing: number) {
+	return order.find(tile =>
+		taken.every(other => tileDistance(other, tile) >= spacing));
+}
+
+/** A seed which reads off the template, so one template always plans one set of tiles. */
+function planSeed(template: Readonly<Uint8Array>, sources: number) {
+	let seed = hashCombine(0x9e3779b9, sources);
+	for (const byte of template) {
+		seed = hashCombine(seed, byte);
+	}
+	return seed;
+}
+
+/**
+ * The objects every covered room is given, planned off the terrain: each source, the mineral and the
+ * controller on ground with standing room beside it, all of them the same tiles in every room.
+ *
+ * Planned on the terrain alone, like `room-gen`'s own generator: what a room already holds is not
+ * consulted, so a room whose source sat in a corner gets the template's layout like every other. A
+ * layout the spacing can't fit -- a wall layout with almost no ground left -- throws rather than
+ * quietly dropping an object.
+ */
+export function objectPlan(
+	template: Readonly<Uint8Array>,
+	sources: number,
+	seed = planSeed(template, sources),
+): ObjectPlan {
+	const order = [ ...shuffle(planTiles(template), seed) ];
+	const spread = (count: number, spacings: readonly number[], anchors: readonly PlanTile[]) => {
+		for (const spacing of spacings) {
+			const tiles: PlanTile[] = [ ...anchors ];
+			while (tiles.length < anchors.length + count) {
+				const tile = pickTile(order, tiles, spacing);
+				if (tile === undefined) {
+					break;
+				}
+				tiles.push(tile);
+			}
+			if (tiles.length === anchors.length + count) {
+				return tiles.slice(anchors.length);
+			}
+		}
+		return undefined;
+	};
+	const sourceTiles = spread(sources, kSourceSpacings, []);
+	if (sourceTiles === undefined || sourceTiles.length !== sources) {
+		throw new Error(`this layout leaves no ground for ${sources} source(s); pick a lighter terrain-type`);
+	}
+	const controller = spread(1, kStationSpacings, sourceTiles)?.[0];
+	const mineral = spread(1, kStationSpacings, controller === undefined ? sourceTiles : [ ...sourceTiles, controller ])?.[0];
+	if (controller === undefined || mineral === undefined) {
+		throw new Error('this layout leaves no ground for a mineral and a controller; pick a lighter terrain-type');
+	}
+	return { sources: sourceTiles, mineral, controller };
 }
