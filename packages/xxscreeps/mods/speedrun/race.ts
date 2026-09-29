@@ -27,8 +27,11 @@ import * as C from 'xxscreeps:mods/constants';
 //   - `speedrun/due` (`shard.data`) — the schedule, one entry per (run, bracket), which the shard tick
 //     processor drains when a bracket comes due. The brackets are tick offsets rather than wall-clock
 //     times, so a shard which is paused or down freezes the race instead of voiding it.
-//   - `speedrun/racing` (`shard.data`) — the runs in progress, for the live board which reads the
-//     rooms straight out of storage.
+//   - `speedrun/racing` (`shard.data`) — one entry per run, the clock the run is measured by: the
+//     live board reads the rooms of these, and the restart at the end of a window is looked up in it
+//     (`resetRun`). An entry goes when the handover lands -- not when the last bracket is scored --
+//     so a run is never left playing with nothing on the clock; the board hides the ones which are
+//     over rather than losing them.
 //
 // A result is only recorded for a player who still holds the room with a controller above the entry
 // bar; see `captureBracket`. Between them, that covers `unclaim`, a downgrade to zero and a respawn:
@@ -139,7 +142,10 @@ export async function startRun(shard: Shard, userId: string, roomName: string, t
  * a run which a later landing superseded, a room which is no longer theirs, and a controller below
  * the entry bar (`RCL < 2`). A superseded run comes off the live board (its player is on a newer
  * one); a lost room does not, since the run is still on the clock and the player will be restarted
- * at the end of it.
+ * at the end of it. Scoring the last bracket does not take the run off the board either: the entry
+ * is the run's clock, the handle the restart at the end of the window is found by (`resetRun`), so it
+ * goes when the handover lands rather than when the last result does. The board hides a run whose
+ * window is out instead (`readRacing`).
  */
 export async function captureBracket(shard: Shard, member: string, time: number) {
 	const parsed = parseDueMember(member);
@@ -200,8 +206,6 @@ export async function captureBracket(shard: Shard, member: string, time: number)
 		shard.db.data.zAdd(playerRunsKey(bracket, userId), [ [ controlPoints, String(run) ] ]),
 		improves ? shard.db.data.zAdd(bestKey(bracket), [ [ controlPoints, userId ] ]) : undefined,
 		improves ? shard.db.data.hSet(playerBracketsKey(userId), String(bracket), String(controlPoints)) : undefined,
-		// The last bracket ends the run; an earlier one leaves it on the live board.
-		bracket === lastBracket() ? shard.data.zRem(racingKey, [ runId ]) : undefined,
 	]);
 	return runId;
 }
@@ -286,23 +290,39 @@ async function resetRun(shard: Shard, runId: string, time: number) {
 	// nobody performs is invisible from the outside, leaving the player playing a run which reads as
 	// restarted.
 	const rooms = await respawnPlayer(shard, userId, info.room === undefined ? [] : [ info.room ]);
-	if (time - (endedTick ?? time) <= resetGiveUpAfter) {
+	const since = time - (endedTick ?? time);
+	if (since <= resetGiveUpAfter) {
+		// Within the give-up window the handover is queued on every tick, so it lands as soon as there
+		// is a tick whose room processing can perform it.
+		return;
+	}
+	// Past it the handover is re-queued on this cadence rather than every tick: a room which has not
+	// come back by now is not waiting on a retry. `since % 50 === 1` is 51, 101, 151, ...
+	if (since % resetGiveUpAfter !== 1) {
 		return;
 	}
 	// The window is out. The rooms are read once more, because a handover which never landed is worth
 	// a line in the log -- that is the one way this goes wrong without looking wrong: the run reads as
 	// restarted while the player is still playing it.
-	const holding = await Promise.all(rooms.map(async roomName => {
+	const stillHolding: string[] = [];
+	await Promise.all(rooms.map(async roomName => {
 		const room = await shard.loadRoom(roomName, time).catch(() => null);
-		return room === null || room['#user'] === userId
-			|| room['#objects'].some(object => object['#user'] === userId);
+		if (room === null || room['#user'] === userId
+			|| room['#objects'].some(object => object['#user'] === userId)) {
+			stillHolding.push(roomName);
+		}
 	}));
-	if (holding.some(Boolean)) {
-		console.warn(`speedrun: ${userId} still holds ${rooms.join(' ')} after the restart window`);
+	if (stillHolding.length !== 0) {
+		// The handover has not landed. The entry stays, and so does the retry, rather than being let go
+		// with the player still playing the run: it is the only handle on this run, and nothing else
+		// would ever put them back on the clock.
+		console.warn(`speedrun: ${userId} still holds ${stillHolding.join(' ')} ${since} tick(s) ` +
+			'after the restart window');
+		return;
 	}
-	// Still no landing: the player has walked away, or is taking their time. Nothing is waiting on the
-	// clock -- their next run starts from the landing, not from here -- so the entry is dropped rather
-	// than read every tick for the rest of the shard's life.
+	// Handed over, and no landing since: the run is over. Nothing is waiting on the clock -- their
+	// next run starts from the landing, not from here -- so the entry is dropped rather than read
+	// every so often for the rest of the shard's life.
 	await shard.data.zRem(racingKey, [ runId ]);
 }
 
@@ -439,7 +459,9 @@ export interface RacingEntry {
  * The runs in progress, current to the tick: each one is read out of its room rather than out of a
  * stored result, since a run which has not reached a bracket has nothing else recorded. An entry
  * whose run was superseded is dropped from the board as it is read; one of a room which belongs to
- * somebody else is hidden, but kept, so the restart at the end of the window still finds it.
+ * somebody else is hidden, but kept, so the restart at the end of the window still finds it; and one
+ * whose window is out -- the handover has been queued, `resetRun` -- is hidden for the same reason,
+ * since the entry stays until the handover lands.
  */
 export async function readRacing(shard: Shard, time: number) {
 	const racing = await shard.data.zRangeWithScores(racingKey, -Infinity, Infinity, { by: 'SCORE' });
@@ -451,6 +473,10 @@ export async function readRacing(shard: Shard, time: number) {
 		if (Number(info.run ?? 0) !== run || roomName === undefined) {
 			// A later landing took over: this entry describes a run which is over.
 			stale.push(runId);
+			return undefined;
+		}
+		if (info.endedTick !== undefined) {
+			// The window is out: the run is over, and the handover which closes it is on its way.
 			return undefined;
 		}
 		// The room is read at `time` rather than at whatever tick the caller's shard last saw, and it

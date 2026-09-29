@@ -883,7 +883,7 @@ describe('race pages', () => {
 		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'the row is hidden, not dropped: the restart still has to find it');
 	}));
 
-	test('the last bracket takes the run off the live board', () => twoRacers(async ({ shard, player, tick }) => {
+	test('the last bracket lands the result and leaves the run on the clock', () => twoRacers(async ({ shard, player, tick }) => {
 		using brackets = withRaceBrackets([ 2, 4 ]);
 		await player('100', Game => {
 			Game.creeps.dummy?.move(C.TOP);
@@ -893,7 +893,14 @@ describe('race pages', () => {
 		await tick(3);
 		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'still racing until the last bracket');
 		await tick(2);
-		assert.strictEqual(await shard.data.zCard(racingKey), 0, 'and off the board once both are in');
+		// The clock is the handle the restart at the end of the window is found by, so scoring the last
+		// bracket does not take the run off it -- the board hides it when the window runs out instead.
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'the last bracket does not end the run');
+		assert.deepStrictEqual(
+			(await readRacing(shard, shard.time)).map(entry => entry.user),
+			[ '100' ],
+			'and the run is still the one being raced until its window',
+		);
 		assert.deepStrictEqual(
 			await readPlayerBrackets(shard, '100'),
 			[ { bracket: 2, score: 46200 }, { bracket: 4, score: 46200 } ],
@@ -937,6 +944,10 @@ describe('race restarts', () => {
 		assert.strictEqual(ending.endedTick, String(started + 2), 'the handover is queued at the end of the window');
 		assert.strictEqual(ending.run, '1', 'and the run is still the one being closed');
 		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 1, 'the last bracket was scored first');
+		// The window and the last bracket are the same tick here, which is the default: the result lands
+		// and the run is handed over, both from this tick.
+		assert.deepStrictEqual(await readRacing(shard, shard.time), [], 'and off the board, the window being out');
+		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'while the clock keeps it until the handover lands');
 		await tick(2);
 		// The handover ran. The base is gone, and the tile is left for the player to pick.
 		const room = await shard.loadRoom('W3N3');
