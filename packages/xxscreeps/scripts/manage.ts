@@ -37,6 +37,7 @@ import * as ControllerProc from 'xxscreeps/mods/classic/controller/processor.js'
 import 'xxscreeps/mods/meta/leaderboard/model.js';
 import 'xxscreeps/mods/meta/messages/model.js';
 import { create as createSpawn } from 'xxscreeps/mods/classic/spawn/spawn.js';
+import { respawnPlayer } from 'xxscreeps/mods/classic/spawn/model.js';
 import { createRuin } from 'xxscreeps/mods/classic/structure/ruin.js';
 import { OwnedStructure } from 'xxscreeps/mods/classic/structure/structure.js';
 import { catalog } from 'xxscreeps/mods/meta/decorations/catalog.js';
@@ -96,6 +97,26 @@ async function userList() {
 	out(`${'id'.padEnd(idWidth)}  ${'username'.padEnd(20)}  branch`);
 	for (const row of rows) {
 		out(row);
+	}
+}
+
+// Hand a player's rooms back the way the client's respawn button does: one `unspawn` intent per room
+// they are present in -- owned, reserved, or simply standing in -- queued for the next tick, and
+// their flags dropped with it (`mods/classic/spawn/model.js`, which the button's route calls too).
+// Nothing is put back down: the player places their next spawn themselves, which is what opens their
+// next speedrun.
+//
+// The handover is done by the room processor, so the engine has to be running for it to arrive; a
+// paused or stopped engine leaves the intents queued until it ticks again.
+async function userRespawn(who: string) {
+	const userId = await resolveUserId(who);
+	const rooms = await respawnPlayer(shard, userId);
+	await save();
+	out(rooms.length === 0
+		? `${who} (${userId}) holds nothing and stands nowhere: nothing to hand over.`
+		: `Handing ${who} (${userId}) over in ${rooms.length} room(s): ${rooms.join(' ')}`);
+	if (rooms.length !== 0) {
+		out('The rooms are unspawned on the next tick -- the engine has to be running.');
 	}
 }
 
@@ -436,6 +457,7 @@ function usage(): never {
   user badge    <name|id> <json|file>
   user password <name|id> <password>
   user branch   <name|id> <branch>
+  user respawn  <name|id>
   decoration catalog
   decoration list    <name|id>
   decoration grant   <name|id> <decorationId>
@@ -466,6 +488,7 @@ try {
 		case 'user badge': if (rest[0] === undefined || rest[1] === undefined) usage(); await userBadge(rest[0], rest[1]); break;
 		case 'user password': if (rest[0] === undefined || rest[1] === undefined) usage(); await userPassword(rest[0], rest[1]); break;
 		case 'user branch': if (rest[0] === undefined || rest[1] === undefined) usage(); await userBranch(rest[0], rest[1]); break;
+		case 'user respawn': if (rest[0] === undefined) usage(); await userRespawn(rest[0]); break;
 		case 'decoration catalog': decorationCatalog(); break;
 		case 'decoration list': if (rest[0] === undefined) usage(); await decorationList(rest[0]); break;
 		case 'decoration grant': if (rest[0] === undefined || rest[1] === undefined) usage(); await decorationGrant(rest[0], rest[1]); break;
