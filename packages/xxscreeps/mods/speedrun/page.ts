@@ -51,13 +51,6 @@ header {
 }
 .brand { color: var(--gold); font-size: 17px; letter-spacing: 2px; font-weight: 500; }
 .brand small { color: var(--dim); letter-spacing: 1px; font-size: 11px; margin-left: 8px; }
-.tabs { display: flex; gap: 4px; margin-left: 6px; }
-.tab {
-	padding: 5px 13px; border: 1px solid var(--line); background: #202020; color: var(--muted);
-	cursor: pointer; font: inherit; font-size: 13px;
-}
-.tab:hover { background: var(--panel-2); color: var(--text); }
-.tab[aria-selected='true'] { background: #2b2b2b; border-color: var(--gold-dim); color: var(--gold); }
 .meta { margin-left: auto; display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
 button.action {
 	padding: 5px 12px; border: 1px solid var(--line); background: #202020; color: var(--text);
@@ -68,6 +61,9 @@ button.action[disabled] { opacity: .45; cursor: default; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); margin-right: 6px; }
 
 main { padding: 18px; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+/* Two lists side by side while each has room for its columns; one under that, rather than two
+   cramped ones. */
+.boards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); }
 .panel { background: var(--panel); border: 1px solid var(--line); }
 .panel > h2 {
 	margin: 0; padding: 11px 15px; font-size: 15px; font-weight: 400; color: var(--gold);
@@ -100,7 +96,10 @@ tr.top3 .rank { color: #c08a5a; }
 .bar.red > i { background: var(--red); }
 .muted { color: var(--dim); }
 .badge { color: var(--teal); }
-.pager { display: flex; align-items: center; gap: 10px; padding: 10px 15px; color: var(--muted); font-size: 12px; }
+.pager {
+	display: flex; align-items: center; gap: 10px; padding: 10px 15px; color: var(--muted); font-size: 12px;
+	background: var(--panel); border: 1px solid var(--line);
+}
 
 aside {
 	position: fixed; top: 0; right: 0; width: min(680px, 92vw); height: 100%; z-index: 20;
@@ -166,10 +165,9 @@ var progressBar = function(level, progress, total) {
 	return '<div class="bar" title="' + escape(progress) + ' / ' + escape(total || '—') + '">' +
 		'<i style="width:' + percent.toFixed(1) + '%"></i></div>';
 };
-var state = { bracket: null, brackets: [], offset: 0, limit: 25, tick: 0, busy: false, user: null };
+var state = { brackets: [], offset: 0, limit: 25, tick: 0, busy: false, user: null };
 var elements = {
-	board: document.getElementById('board'),
-	boardTitle: document.getElementById('board-title'),
+	boards: document.getElementById('boards'),
 	detail: document.getElementById('detail'),
 	detailBody: document.getElementById('detail-body'),
 	detailName: document.getElementById('detail-name'),
@@ -178,26 +176,46 @@ var elements = {
 	pager: document.getElementById('pager'),
 	refresh: document.getElementById('refresh'),
 	scrim: document.getElementById('scrim'),
-	tabs: document.getElementById('tabs'),
 	tick: document.getElementById('tick')
 };
 
-function renderTabs() {
-	elements.tabs.innerHTML = state.brackets.map(function(bracket) {
-		return '<button class="tab" role="tab" data-bracket="' + escape(bracket) + '"' +
-			(bracket === state.bracket ? ' aria-selected="true"' : '') + '>' + ticks(bracket) + ' ticks</button>';
-	}).join('');
-	Array.prototype.forEach.call(elements.tabs.querySelectorAll('.tab'), function(tab) {
-		tab.addEventListener('click', function() {
-			state.bracket = Number(tab.getAttribute('data-bracket'));
-			state.offset = 0;
-			closeDetail();
-			loadBoard();
-		});
-	});
+// Every bracket is its own list, side by side: a player's standing at 20k is not their standing at
+// 40k, and the two are read together more often than either is read alone.
+function boardShell(page) {
+	var players = page.count + ' player' + (page.count === 1 ? '' : 's');
+	return '<section class="panel"><h2><span>Best after ' + ticks(page.bracket) + ' ticks</span>' +
+		'<span class="sub">' + players + '</span></h2>' +
+		'<div class="body table-wrap"><table></table></div></section>';
 }
 
-function renderBoard(page) {
+function renderBoards(pages) {
+	if (pages.length === 0) {
+		elements.boards.innerHTML = '<section class="panel"><div class="empty">' +
+			'No brackets are configured, so nothing has been recorded.</div></section>';
+		elements.pager.innerHTML = '';
+		return;
+	}
+	elements.boards.innerHTML = pages.map(boardShell).join('');
+	var tables = elements.boards.querySelectorAll('table');
+	Array.prototype.forEach.call(tables, function(table, index) {
+		renderBoard(table, pages[index]);
+	});
+	var shortest = Math.min.apply(null, pages.map(function(page) { return page.count; }));
+	var exhausted = pages.every(function(page) { return state.offset + state.limit >= page.count; });
+	var from = shortest === 0 ? 0 : state.offset + 1;
+	var to = Math.min(state.offset + state.limit, shortest);
+	elements.pager.innerHTML =
+		'<button class="action" id="pager-prev"' + (state.offset === 0 ? ' disabled' : '') + '>‹ Prev</button>' +
+		'<span class="nowrap">' + from + '–' + to + '</span>' +
+		'<button class="action" id="pager-next"' + (exhausted ? ' disabled' : '') + '>Next ›</button>' +
+		'<span class="muted">one row per player, their best</span>';
+	var prev = document.getElementById('pager-prev');
+	var next = document.getElementById('pager-next');
+	if (prev) { prev.addEventListener('click', function() { state.offset = Math.max(0, state.offset - state.limit); loadBoard(); }); }
+	if (next) { next.addEventListener('click', function() { state.offset += state.limit; loadBoard(); }); }
+}
+
+function renderBoard(board, page) {
 	var rows = page.list.map(function(entry, index) {
 		var score = entry.record || {};
 		var place = entry.rank + 1;
@@ -213,23 +231,13 @@ function renderBoard(page) {
 			'<td class="muted">' + escape(when(score.at)) + '</td>' +
 			'</tr>';
 	}).join('');
-	elements.boardTitle.textContent = 'Best after ' + state.bracket + ' ticks';
-	elements.board.innerHTML =
+	board.innerHTML =
 		'<thead><tr><th class="num">#</th><th>Player</th><th class="num">Level</th><th>Progress</th>' +
 		'<th class="num">Score</th><th>Room</th><th class="num">Run</th><th>Recorded</th></tr></thead>' +
 		'<tbody>' + (rows || '<tr><td colspan="8" class="empty">Nobody has finished this bracket yet.</td></tr>') + '</tbody>';
-	Array.prototype.forEach.call(elements.board.querySelectorAll('tbody tr[data-user]'), function(row) {
+	Array.prototype.forEach.call(board.querySelectorAll('tbody tr[data-user]'), function(row) {
 		row.addEventListener('click', function() { openDetail(row.getAttribute('data-user')); });
 	});
-	var from = page.count === 0 ? 0 : state.offset + 1;
-	var to = Math.min(state.offset + state.limit, page.count);
-	elements.pager.innerHTML = '<span>' + from + '–' + to + ' of ' + page.count + ' players</span>' +
-		'<button class="action" id="pager-prev"' + (state.offset === 0 ? ' disabled' : '') + '>‹ Prev</button>' +
-		'<button class="action" id="pager-next"' + (to >= page.count ? ' disabled' : '') + '>Next ›</button>';
-	var prev = document.getElementById('pager-prev');
-	var next = document.getElementById('pager-next');
-	if (prev) { prev.addEventListener('click', function() { state.offset = Math.max(0, state.offset - state.limit); loadBoard(); }); }
-	if (next) { next.addEventListener('click', function() { state.offset += state.limit; loadBoard(); }); }
 }
 
 function renderLive(page) {
@@ -307,16 +315,31 @@ function closeDetail() {
 	if (history.replaceState) { history.replaceState(null, '', location.pathname); }
 }
 
+function boardQuery(bracket) {
+	return '/api/speedrun/leaderboard?offset=' + state.offset + '&limit=' + state.limit +
+		(bracket == null ? '' : '&bracket=' + bracket);
+}
+
+// One page of every bracket, asked for at once so the lists stay in step as the page moves. With no
+// bracket known yet the request names none and the answer carries the list of them.
 function loadBoard() {
 	elements.refresh.disabled = true;
-	var query = '/api/speedrun/leaderboard?offset=' + state.offset + '&limit=' + state.limit +
-		(state.bracket == null ? '' : '&bracket=' + state.bracket);
-	return api(query).then(function(page) {
-		if (state.bracket == null && page.bracket != null) { state.bracket = page.bracket; }
-		if (state.brackets.length === 0 && page.brackets) { state.brackets = page.brackets; renderTabs(); }
-		renderBoard(page);
+	var known = state.brackets;
+	var requests = known.length === 0
+		? [ boardQuery(null) ]
+		: known.map(function(bracket) { return boardQuery(bracket); });
+	return Promise.all(requests.map(function(query) { return api(query); })).then(function(pages) {
+		var brackets = known.length === 0 ? pages[0].brackets || [] : known;
+		state.brackets = brackets;
+		return Promise.all(brackets.map(function(bracket, index) {
+			return known.length === 0 && index === 0 ? pages[0] : api(boardQuery(bracket));
+		}));
+	}).then(function(pages) {
+		renderBoards(pages);
 	}).catch(function(error) {
-		elements.board.innerHTML = '<tbody><tr><td class="empty">Could not load the board: ' + escape(error.message) + '</td></tr></tbody>';
+		elements.boards.innerHTML = '<section class="panel"><div class="empty">Could not load the board: ' +
+			escape(error.message) + '</div></section>';
+		elements.pager.innerHTML = '';
 	}).then(function() { elements.refresh.disabled = false; });
 }
 
@@ -324,7 +347,7 @@ function loadLive() {
 	return api('/api/speedrun/racing').then(function(page) {
 		state.tick = page.time;
 		elements.tick.textContent = 'tick ' + page.time;
-		if (state.brackets.length === 0 && page.brackets) { state.brackets = page.brackets; renderTabs(); }
+		if (state.brackets.length === 0 && page.brackets) { state.brackets = page.brackets; }
 		renderLive(page);
 	}).catch(function(error) {
 		elements.live.innerHTML = '<tbody><tr><td class="empty">Could not load the live board: ' + escape(error.message) + '</td></tr></tbody>';
@@ -364,7 +387,6 @@ export const speedrunPage = `<!doctype html>
 <body>
 <header>
 	<div class="brand">SPEEDRUN<small>race results</small></div>
-	<nav class="tabs" role="tablist" id="tabs"></nav>
 	<div class="meta">
 		<span id="tick"></span>
 		<span><span class="dot"></span>live</span>
@@ -376,11 +398,8 @@ export const speedrunPage = `<!doctype html>
 		<h2>Racing now <span class="sub" id="live-count"></span></h2>
 		<div class="body table-wrap"><table id="live"></table></div>
 	</section>
-	<section class="panel">
-		<h2><span id="board-title">Leaderboard</span> <span class="sub">one row per player, their best</span></h2>
-		<div class="body table-wrap"><table id="board"></table></div>
-		<div class="pager" id="pager"></div>
-	</section>
+	<div class="boards" id="boards"></div>
+	<div class="pager" id="pager"></div>
 </main>
 <footer>
 	Every landing starts a run; a result is recorded once the bracket's ticks are up, while the room is
