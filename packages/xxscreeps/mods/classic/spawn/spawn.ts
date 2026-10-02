@@ -15,6 +15,7 @@ import { BufferObject } from 'xxscreeps/schema/buffer-object.js';
 import { withOverlay } from 'xxscreeps/schema/index.js';
 import { assign } from 'xxscreeps/utility/utility.js';
 import * as C from 'xxscreeps:mods/constants';
+import { getSpawnRules } from './rules.js';
 import { bindSpawningFormat, spawnShape, spawningShape } from './schema.js';
 
 interface SpawnCreepOptions {
@@ -452,7 +453,9 @@ export function checkSpawnCreep(
 
 			// Check body cost
 			const creepCost = Fn.accumulate(body, part => C.BODYPART_COST[part]);
-			if (energyStructures) {
+			if (getSpawnRules(spawn).freeEnergy) {
+				return C.OK;
+			} else if (energyStructures) {
 				const totalEnergy = Fn.accumulate(new Set(energyStructures), structure => structure.energy);
 				if (totalEnergy < creepCost) {
 					return C.ERR_NOT_ENOUGH_ENERGY;

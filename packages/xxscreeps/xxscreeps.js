@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import 'xxscreeps/config/mods.js';
+import { mods } from 'xxscreeps/config/mods.js';
 
 // Get script and remove `xxscreeps.js` from args
 process.argv.splice(1, 1);
@@ -22,6 +22,9 @@ const commands = {
 	test: './dist/test/run.js',
 	types: './dist/scripts/types.js',
 	'uniform-terrain': './dist/scripts/uniform-terrain.js',
+	...mods.some(mod => mod.url.endsWith('/mods/stronghold-challenge/index.js')) && {
+		'prepare-stronghold': './dist/mods/stronghold-challenge/prepare.js',
+	},
 };
 const command = specifier.startsWith('file:') ? specifier : commands[specifier ?? 'cli'];
 if (command === undefined) {
