@@ -301,7 +301,7 @@ function crushStrongholdTiles(core: StructureInvaderCore, template: StrongholdTe
 // Deploy the stronghold: drop the deploy timer, start the shared collapse timer, and spawn the
 // template peers carrying that same timer so the whole stronghold vanishes together. Unowned peers
 // are recorded on the core as its property.
-function deployStronghold(core: StructureInvaderCore, context: ProcessorContext) {
+export function deployStronghold(core: StructureInvaderCore, context: ProcessorContext) {
 	const templateName = core['#templateName'];
 	if (templateName === undefined) {
 		throw new Error('Deploying invader core has no stronghold template');

@@ -18,6 +18,7 @@ import { OwnedStructure, checkMyStructure, lookForStructures } from 'xxscreeps/m
 import { assign } from 'xxscreeps/utility/utility.js';
 import * as C from 'xxscreeps:mods/constants';
 import { StructureExtension } from './extension.js';
+import { getSpawnRules, spawnTime } from './rules.js';
 import { Spawning, StructureSpawn, calculateRenewAmount, calculateRenewCost, checkDirections, checkRecycleCreep, checkRenewCreep, checkSpawnCreep, create } from './spawn.js';
 
 type EnergyStructure = StructureExtension | StructureSpawn;
@@ -169,10 +170,11 @@ const intents = [
 
 		// Withdraw energy
 		const cost = Fn.accumulate(body, part => C.BODYPART_COST[part]);
-		if (!consumeEnergy(spawn, cost, structures)) {
+		const freeEnergy = getSpawnRules(spawn).freeEnergy;
+		if (!freeEnergy && !consumeEnergy(spawn, cost, structures)) {
 			return;
 		}
-		context.incrementRoomStat?.(me, 'energyCreeps', cost);
+		context.incrementRoomStat?.(me, 'energyCreeps', freeEnergy ? 0 : cost);
 		context.incrementRoomStat?.(me, 'creepsProduced', body.length);
 
 		// Add new creep to room objects
@@ -181,7 +183,7 @@ const intents = [
 		spawn.room['#insertObject'](creep);
 
 		// Set spawning information
-		const needTime = body.length * C.CREEP_SPAWN_TIME;
+		const needTime = spawnTime(spawn, body.length);
 		const spawning = spawn.spawning = assign(new StructureSpawn.Spawning(), {
 			directions: directions ?? undefined,
 			needTime,
