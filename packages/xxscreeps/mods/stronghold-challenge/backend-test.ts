@@ -12,6 +12,7 @@ import { challengeRankingKeys } from './ranking.js';
 import { writeRankedRun } from './runs.js';
 import { loadChallengePair, pairKey, prepareStrongholdChallenge } from './setup.js';
 import './effects-test.js';
+import './page-test.js';
 import 'xxscreeps:mods/backend';
 
 const prefix = '/api/stronghold-challenge/';
