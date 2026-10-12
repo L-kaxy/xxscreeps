@@ -25,16 +25,20 @@ docker exec -i xxscreeps /xxscreeps/node_modules/.bin/xxscreeps uniform-terrain 
 
 ## 1. 这套规则集做了什么
 
+赛季 1 的作用范围固定为 **`W1N1～W9N9`**。下列地图和玩法调整、初始落地后的比赛计时及榜单只处理这个区块；highway 和其他区块不受旧配置影响。玩家本身的 respawn 仍清理该玩家全部房间，但额外的无主建筑清理只作用于旧区块。
+
 | 干什么 | 效果 |
 |---|---|
-| **统一地形** | 把所有非核心房间刷成**同一套地形**（同一套源/矿物/控制器落位），每间房开局条件相同；相邻房间的出口逐格对齐，上下左右都走得通 |
-| **封核心** | 每扇区中心 3×3（核心 9 房）封死：房间关闭 + 地形全墙，且与核心共边的 12 间房朝核心那条边整条封死 ⇒ 人只能在自己的 9×9 内部玩 |
-| **去掉随机事件** | 定期入侵、deposit、power bank 生成关闭；结构被摧毁不留废墟 |
+| **统一地形** | 把旧区块的 72 个非核心房间刷成**同一套地形**（同一套源/矿物/控制器落位）；不再改写 highway 或其他区块 |
+| **封核心** | 仅 `W4N4～W6N6` 关闭、封墙，与核心共边的旧区块房间封住朝核心的边；其他分区中央九房保持原状 |
+| **去掉随机事件** | 旧区块内的定期入侵、deposit、power bank 生成关闭；旧区块结构被摧毁不留废墟；区块外保留原版机制 |
 | **禁占房** | `claimController` 禁用 ⇒ 只能在自己落地那间房发展（房间归属靠落地，不靠占控制器） |
 | **竞速成绩** | 每次落地开始一局；开局后 **20000 / 40000 tick** 各记一次成绩（RCL + 控制点）；满 **40000 tick 自动交还**（和点客户端 respawn 按钮同一个实现）：房间、物件、控制器全部交回世界，玩家自己再找地方落地 |
 | **成绩榜页面** | `/speedrun`：上方「Racing now」实时榜（直接读房间），下方左右两块 **20k / 40k** 累计榜；点玩家看该玩家全部记录；客户端侧边栏有入口（新标签打开） |
 
 入榜规则：**丢房不入榜**（房间被抢/自己丢了就不记）、**RCL < 2 不入榜**、每条成绩带**入榜时间戳**；一局结束后该玩家不再更新该局数据。
+
+玩家成功在区块外落地时，不启动旧赛季比赛，并取消之前旧比赛的计时任务。历史区块外成绩保留原始数据，但不参与旧赛季榜单、排名和最好成绩。
 
 ---
 
@@ -200,7 +204,7 @@ docker run --rm -it -v ~/xxscreeps-data:/data xxscreeps <command> [args]
 
 | 指令 | 干什么 | 例子 |
 |---|---|---|
-| `uniform-terrain` | **一次性**把全世界的内部房间刷成同一套地形 + 一套物件落位（详见 §6） | `… uniform-terrain --terrain-type 1 --swamp-type 0 --sources 2` |
+| `uniform-terrain` | **一次性**把旧区块的 72 个非核心房间刷成同一套地形 + 一套物件落位（详见 §6） | `… uniform-terrain --terrain-type 1 --swamp-type 0 --sources 2` |
 | `manage game reload-terrain` | 让运行中的服务**重读地形**（backend 立刻生效、引擎下一 tick 生效），不用重启、不踢人；玩家沙箱会用新地形重建（Memory / CPU 不清） | `… manage game reload-terrain` |
 | `manage user respawn <名字\|id>` | 立刻把某个玩家按「丢房」处理（排交还意图，下一 tick 生效）；成绩不再更新 | `… manage user respawn E9C50` |
 | `manage user list` | 列出所有账号（id ↔ 用户名），拿 id 用 | `… manage user list` |
@@ -214,7 +218,7 @@ docker run --rm -it -v ~/xxscreeps-data:/data xxscreeps <command> [args]
 
 ### 6.1 它做什么
 
-把每扇区 9×9 内部（81 − 核心 9 = **72 间房**）刷成同一张模板：地形用上游 `generate-room` 的生成器（同一套 `--terrain-type` / `--swamp-type` 取值），但四边都用**居中开口**，所以相邻两房逐格对齐；源 / 矿物 / 控制器按 `room-gen` 的规则落位（**放在墙格里 + 四周有可走地面**），参数一样、不需要指定房间号。
+把 `W1N1～W9N9` 内部（81 − 核心 9 = **72 间房**）刷成同一张模板：地形用上游 `generate-room` 的生成器（同一套 `--terrain-type` / `--swamp-type` 取值），但四边都用**居中开口**，所以覆盖房间之间的出口逐格对齐；源 / 矿物 / 控制器按 `room-gen` 的规则落位（**放在墙格里 + 四周有可走地面**），参数一样、不需要指定房间号。highway 不再自动开口；`--restore` 只合并恢复旧区块，不覆盖备份之后新增或修改的其他分区。
 
 是一次性命令（跟 `generate-room` 一样用指令触发），**不会**随服务启动自动跑。
 
@@ -269,14 +273,14 @@ xxscreeps uniform-terrain [--shard shard] [--terrain-type 1-28] [--swamp-type 0-
 
 ```
 template: terrain-type 1, swamp-type 0, 8 tile exits
-covered 72 rooms, opened 36 highway ring faces, terrain written
+covered 72 rooms, terrain written
 objects: 2 source(s) per room, one mineral and one controller; 72 room(s) rewritten, 259 object(s) moved, 30 added
 ground beside the objects, before: 2 source(s), 1 mineral(s), 1 controller(s); after: none
 every source, mineral and controller has ground to work from
 storage: sibling
 ```
 
-- `covered 72 rooms` = 覆盖到的房间数（每扇区 72；多扇区会累加）。
+- `covered 72 rooms` = 旧区块的非核心房间数；不会累加其他扇区，highway 改写数为 0。
 - `terrain already uniform` + `nothing written` = 幂等，已经刷过了（或用了 `--dry-run`）。
 - `ground beside the objects, before/after` = 物件四周有没有可走地面；after 是 `none` 才算成功。
 - `storage: …` = 见 §6.3；`files` 而服务在跑就先停服。

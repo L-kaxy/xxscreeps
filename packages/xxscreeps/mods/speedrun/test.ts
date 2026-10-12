@@ -33,6 +33,8 @@ import {
 	readPlayerBrackets, readPlayerRecords, readRacing, runKey, scoreKey, startRun,
 } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
+import { isSpeedrunRoom } from './scope.js';
+import './scope-test.js';
 import { applyUniform, generateTemplate, hasStandingRoom, isUniform, objectPlan, templateExitWidth, templateExits, uniformLayout } from './template.js';
 import { applyUniformTerrain, restoreUniform } from './uniform.js';
 import { isSolid, wallSectorCores } from './walls.js';
@@ -125,12 +127,12 @@ describe('mods/speedrun', () => {
 			assert.strictEqual(centers.sort().join(' '), 'W15N15 W15N5 W5N15 W5N5');
 		});
 
-		test('every center contributes its own 3x3, and nothing else', () => {
-			assert.strictEqual(closing.length, 36, 'four centers, nine rooms each, no overlap between them');
-			for (const name of [ 'W5N5', 'W4N4', 'W6N6', 'W14N14', 'W16N16', 'W4N14', 'W16N4', 'W14N16' ]) {
+		test('only the old sector contributes its 3x3', () => {
+			assert.strictEqual(closing.length, 9, 'only W4N4 through W6N6');
+			for (const name of [ 'W5N5', 'W4N4', 'W6N6' ]) {
 				assert.ok(closing.includes(name), `${name} belongs to a sector core`);
 			}
-			for (const name of [ 'W7N7', 'W3N5', 'W10N10', 'W13N13', 'W17N15' ]) {
+			for (const name of [ 'W7N7', 'W3N5', 'W10N10', 'W13N13', 'W17N15', 'W14N14', 'W16N16', 'W4N14', 'W16N4' ]) {
 				assert.ok(!closing.includes(name), `${name} does not belong to a sector core`);
 			}
 		});
@@ -141,7 +143,7 @@ describe('mods/speedrun', () => {
 				const type = roomType(name);
 				assert.strictEqual(
 					set.has(name),
-					type === 'center' || type === 'sourceKeeper',
+					isSpeedrunRoom(name) && (type === 'center' || type === 'sourceKeeper'),
 					`${name} is ${type}`,
 				);
 			}
@@ -159,7 +161,7 @@ describe('mods/speedrun', () => {
 			const bare: Map<string, { sectorControl?: undefined }> = new Map();
 			assert.strictEqual(
 				roomsToClose(bare, [ 'W1N1', 'W5N5', 'W7N7', 'W0N0', 'W15N15' ]).join(' '),
-				'W5N5 W15N15',
+				'W5N5',
 			);
 		});
 	});
@@ -190,7 +192,7 @@ describe('mods/speedrun', () => {
 		});
 
 		test('every tile of every core room is wall', () => {
-			assert.strictEqual(core.length, 36, 'four centers, nine rooms each');
+			assert.strictEqual(core.length, 9, 'only the old sector');
 			for (const name of core) {
 				const record = terrain.get(name)!;
 				assert.strictEqual(record.exits, 0, `${name} advertises no way out`);
@@ -267,18 +269,14 @@ describe('mods/speedrun', () => {
 			);
 		});
 
-		test('the placement intents resolve to the ruleset handler', () => {
-			// The mechanism is that `initializeIntentConstraints` sorts registrations and the room
-			// intent stage takes the first entry whose receiver matches the room. The generator's
-			// handler carries the four arguments of the intent, the ruleset's carries none.
+		test('the placement intents chain one handler instead of globally shadowing vanilla', () => {
 			for (const intent of [ 'placeDeposit', 'placePowerBank' ]) {
 				const infos = intentProcessors.filter(info => info.intent === intent && info.receiver === Room);
-				assert.ok(infos.length > 0, `${intent} is registered`);
-				assert.strictEqual(infos[0]!.process.length, 0, `${intent} resolves to the ruleset handler`);
+				assert.strictEqual(infos.length, 1, `${intent} has one room-scoped handler`);
 			}
 		});
 
-		test('a due sector is evaluated without placing a deposit', () => simulate({})(async ({ shard, tick }) => {
+		test('a due sector still places deposits on its out-of-sector highways', () => simulate({})(async ({ shard, tick }) => {
 			using bootstrap = withDepositBootstrap();
 			await runShardInitializers(shard);
 			assert.ok((await dueSectorsAt(shard, Date.now())).includes('W5N5'), 'the sector came due');
@@ -289,19 +287,19 @@ describe('mods/speedrun', () => {
 			const { sectorControl } = testWorld.map['#getRoomTraits']('W5N5');
 			assert.ok(sectorControl, 'the test world has a single sector, W5N5');
 			const deposits = await loadSectorDeposits(shard, testWorld, 'W5N5', sectorControl.edges);
-			assert.strictEqual(deposits.length, 0, 'and no deposit was placed');
+			assert.ok(deposits.length > 0, 'highways are outside the old ruleset');
 		}));
 
-		test('a due highway room runs its timer without placing a power bank', () => simulate({})(async ({ shard, tick }) => {
+		test('a due highway room retains vanilla power-bank placement', () => simulate({})(async ({ shard, tick }) => {
 			using rng = deterministicRandomForTesting();
 			const scheduledAt = shard.time;
 			await scheduleRoom(shard, 'W0N0', 0);
 			await tick(2);
 			const room = await shard.loadRoom('W0N0');
-			assert.strictEqual(
+			assert.notStrictEqual(
 				Fn.find(room['#objects'], instanceOfPredicate(StructurePowerBank)),
 				undefined,
-				'no power bank was placed',
+				'a power bank was placed outside the old sector',
 			);
 			// The generator ran: it rolled the next respawn and pushed the scratch schedule forward.
 			const due = (await inspectDuePowerBankRoomsForTest(shard)).find(([ , roomName ]) => roomName === 'W0N0');
@@ -309,7 +307,7 @@ describe('mods/speedrun', () => {
 			assert.ok(due[0] - scheduledAt >= C.POWER_BANK_RESPAWN_TIME * 0.75, 'its timer moved into the future');
 			// The next-due tick is persisted by the intent handler, which the ruleset takes over -- so the
 			// room itself is left exactly as it was: nothing is written to the world.
-			assert.strictEqual(room['#nextPowerBankTime'], 0, 'the room was not written to');
+			assert.ok(room['#nextPowerBankTime'] > 0, 'vanilla persisted the room schedule');
 		}));
 	});
 
@@ -370,7 +368,6 @@ describe('ruin suppression', () => {
 	const ruined = simulate({
 		W7N7: room => {
 			room['#insertObject'](createCreep(dummyPos, [ C.MOVE ], 'dummy', '100'));
-			room['#insertObject'](createRuin(createSpawn(new RoomPosition(27, 25, 'W7N7'), '100', 'RuinedSpawn')));
 		},
 	});
 
@@ -382,8 +379,11 @@ describe('ruin suppression', () => {
 		);
 	});
 
-	test('ruins off: the ruin handed to the room never lands', () => ruined(async ({ player, tick }) => {
+	test('ruins off: the ruin handed to the room never lands', () => ruined(async ({ player, tick, poke }) => {
 		using suppression = withRuins(false);
+		await poke('W7N7', '100', (_Game, room) => {
+			room['#insertObject'](createRuin(createSpawn(new RoomPosition(27, 25, room.name), '100', 'RuinedSpawn')));
+		});
 		await player('100', Game => {
 			Game.creeps.dummy?.move(C.TOP);
 		});
@@ -393,8 +393,11 @@ describe('ruin suppression', () => {
 		});
 	}));
 
-	test('ruins on: the same room keeps it', () => ruined(async ({ player, tick }) => {
+	test('ruins on: the same room keeps it', () => ruined(async ({ player, tick, poke }) => {
 		using suppression = withRuins(true);
+		await poke('W7N7', '100', (_Game, room) => {
+			room['#insertObject'](createRuin(createSpawn(new RoomPosition(27, 25, room.name), '100', 'RuinedSpawn')));
+		});
 		await player('100', Game => {
 			Game.creeps.dummy?.move(C.TOP);
 		});
@@ -644,7 +647,7 @@ describe('race results', () => {
 		await tick();
 		await land(shard, 'W3N3', '100');
 		await tick(3);
-		assert.deepStrictEqual(await shard.db.data.hGetAll(scoreKey(2, '100:1')), {});
+		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(scoreKey(2, '100:1'))), []);
 		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 0);
 	}));
 
@@ -656,7 +659,7 @@ describe('race results', () => {
 		await tick();
 		await startRun(shard, '100', 'W3N3', shard.time);
 		await tick(2);
-		assert.deepStrictEqual(await shard.db.data.hGetAll(scoreKey(2, '100:1')), {});
+		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(scoreKey(2, '100:1'))), []);
 		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 0);
 	}));
 
@@ -672,8 +675,8 @@ describe('race results', () => {
 		await tick(5);
 		assert.deepStrictEqual(await shard.db.data.zRange(rankKey(4), 0, 10), [ '100:2' ]);
 		assert.deepStrictEqual(
-			await shard.db.data.hGetAll(scoreKey(4, '100:1')),
-			{},
+			Object.keys(await shard.db.data.hGetAll(scoreKey(4, '100:1'))),
+			[],
 			'the superseded run recorded nothing',
 		);
 		// A third landing keeps what the second one recorded.
@@ -690,7 +693,7 @@ describe('race results', () => {
 		await tick();
 		await land(shard, 'W3N3', '100');
 		await tick();
-		assert.deepStrictEqual(await shard.db.data.hGetAll(runKey('100')), {}, 'no run was started');
+		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(runKey('100'))), [], 'no run was started');
 		assert.strictEqual(await shard.data.zCard(dueRunsKey), 0);
 	}));
 });
@@ -772,22 +775,25 @@ describe('race pages', () => {
 		assert.strictEqual(await shard.db.data.zCard(bestKey(2)), 2, 'and the board is one entry per player');
 	}));
 
-	test('a worse run adds a record without replacing the best', () => twoRacers(async ({ shard, player, tick }) => {
+	test('a worse run adds a record without replacing the best', () => twoRacers(async ({ shard, player, tick, poke }) => {
 		using brackets = withRaceBrackets([ 2 ]);
 		await player('100', Game => {
 			Game.creeps.dummy?.move(C.TOP);
 		});
 		await tick();
+		await poke('W4N3', '100', (_Game, room) => {
+			room['#user'] = room.controller!['#user'] = '100';
+		});
 		await landIn(shard, '100', 'W4N3');
 		await tick(3);
 		await landIn(shard, '100', 'W3N3');
 		await tick(3);
 		assert.deepStrictEqual(
-			await shard.db.data.zRangeWithScores(bestKey(2), 0, 10, { by: 'SCORE' }),
+			await shard.db.data.zRangeWithScores(bestKey(2), 0, 10),
 			[ [ 180200, '100' ] ],
 			'the board still holds the better run',
 		);
-		assert.deepStrictEqual(await shard.db.data.hGetAll(playerBracketsKey('100')), { '2': '180200' });
+		assert.deepStrictEqual({ ...await shard.db.data.hGetAll(playerBracketsKey('100')) }, { '2': '180200' });
 		assert.strictEqual(await shard.db.data.zCard(playerRunsKey(2, '100')), 2, 'both runs are on file');
 		const page = await readLeaderboard(shard, 2, 0, 10);
 		assert.deepStrictEqual(
@@ -796,7 +802,7 @@ describe('race pages', () => {
 		);
 	}));
 
-	test('the records of a player come back best first, with their standing', () => twoRacers(async ({ shard, player, tick }) => {
+	test('the records of a player come back best first, with their standing', () => twoRacers(async ({ shard, player, tick, poke }) => {
 		using brackets = withRaceBrackets([ 2 ]);
 		await player('100', Game => {
 			Game.creeps.dummy?.move(C.TOP);
@@ -804,6 +810,9 @@ describe('race pages', () => {
 		await tick();
 		await landIn(shard, '100', 'W3N3');
 		await tick(3);
+		await poke('W4N3', '100', (_Game, room) => {
+			room['#user'] = room.controller!['#user'] = '100';
+		});
 		await landIn(shard, '100', 'W4N3');
 		await tick(3);
 		const records = await readPlayerRecords(shard, '100', [ 2 ]);
@@ -850,7 +859,7 @@ describe('race pages', () => {
 		await tick();
 		await landIn(shard, '100', 'W3N3');
 		await tick(3);
-		assert.deepStrictEqual(await shard.db.data.hGetAll(scoreKey(2, '100:1')), {}, 'nothing was recorded');
+		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(scoreKey(2, '100:1'))), [], 'nothing was recorded');
 		assert.strictEqual(await shard.db.data.zCard(rankKey(2)), 0);
 		assert.strictEqual(await shard.data.zCard(racingKey), 1, 'and the run is still on');
 		assert.deepStrictEqual(
@@ -905,7 +914,7 @@ describe('race pages', () => {
 			await readPlayerBrackets(shard, '100'),
 			[ { bracket: 2, score: 46200 }, { bracket: 4, score: 46200 } ],
 		);
-		assert.deepStrictEqual(await shard.db.data.zRangeWithScores(bestKey(4), 0, 10, { by: 'SCORE' }), [ [ 46200, '100' ] ]);
+		assert.deepStrictEqual(await shard.db.data.zRangeWithScores(bestKey(4), 0, 10), [ [ 46200, '100' ] ]);
 	}));
 });
 
@@ -1185,7 +1194,7 @@ describe('uniform rooms', () => {
 		const report = await applyUniformTerrain(shard, { terrainType: 1, swampType: 0, exitWidth: 8 });
 		assert.strictEqual(report.written, true, 'the stamp was written');
 		assert.strictEqual(report.covered, members.size - core.size, 'every room of the interior but the core');
-		assert.ok(report.ringFaces > 0, 'and the highway ring faces which look at one of them');
+		assert.strictEqual(report.ringFaces, 0, 'no highway is rewritten');
 		assert.ok(report.roomsWritten > 0, 'every covered room was given the plan\'s objects');
 		assert.strictEqual(
 			report.lossesAfter.sources + report.lossesAfter.minerals + report.lossesAfter.controllers,
@@ -1278,12 +1287,12 @@ describe('uniform rooms', () => {
 		}
 	});
 
-	test('the interiors and the highway ring come out of the sector records', () => {
+	test('only the old interior is selected, never the highway ring', () => {
 		const terrain = field();
 		const layout = uniformLayout(terrain, sectorCoreRooms(terrain));
-		assert.strictEqual(layout.core.length, 36, 'four cores of nine rooms');
-		assert.strictEqual(layout.rooms.length, 4 * 81 - 36, 'four interiors of 81 rooms, minus their cores');
-		assert.ok(layout.ring.length > 0, 'the highway ring is read too');
+		assert.strictEqual(layout.core.length, 9, 'one core of nine rooms');
+		assert.strictEqual(layout.rooms.length, 72, 'only the old interior minus its core');
+		assert.strictEqual(layout.ring.length, 0, 'highways are outside season 1');
 		assert.strictEqual(
 			layout.rooms.filter(name => layout.ring.includes(name)).length,
 			0,
@@ -1304,7 +1313,7 @@ describe('uniform rooms', () => {
 			layout.rooms.length,
 			'every covered room was written',
 		);
-		assert.ok(touched.length > layout.rooms.length, 'and the ring faces which look at one of them');
+		assert.strictEqual(touched.length, layout.rooms.length, 'no room outside the old interior is written');
 		assert.strictEqual(isUniform(terrain, template, layout, { ringEdges: true, sealCore: true }), true, 'and the world now holds it');
 
 		// `W2N2` is inside a sector with no core next to it: template everywhere.
@@ -1326,7 +1335,7 @@ describe('uniform rooms', () => {
 		// number is further west -- so the shared edge is `W0N5`'s own west column.
 		const ring = new Set(layout.ring);
 		const border = terrain.get('W1N5')!;
-		assert.strictEqual(ring.has('W0N5'), true, 'W0N5 is the highway ring east of W1N5');
+		assert.strictEqual(ring.has('W0N5'), false, 'the highway is not selected');
 		for (let yy = 21; yy <= 28; ++yy) {
 			assert.strictEqual(terrain.get('W0N5')!.terrain.get(0, yy), 0, `W0N5 0,${yy} is opened`);
 		}

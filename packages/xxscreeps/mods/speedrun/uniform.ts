@@ -2,10 +2,11 @@ import type { Shard } from 'xxscreeps/engine/db/shard.js';
 import type { ResourceType } from 'xxscreeps/mods/classic/resource/resource.js';
 import type { ObjectPlan } from './template.js';
 import { Mutex } from 'xxscreeps/engine/db/mutex.js';
-import { schema as worldSchema } from 'xxscreeps/game/map.js';
+import { World, schema as worldSchema } from 'xxscreeps/game/map.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
 import { objectLosses, objectsMatch, placeObjects } from './place.js';
 import { sectorCoreRooms } from './rooms.js';
+import { isSpeedrunRoom } from './scope.js';
 import {
 	applyUniform, coveredTerrain, generateTemplate, isUniform, kDefaultSources, kMaxSwampType, kMaxTerrainType,
 	objectPlan, templateExitWidth, uniformLayout,
@@ -14,7 +15,7 @@ import {
 /**
  * One world for the whole interior, as the `uniform-terrain` command runs it.
  *
- * Every room of every sector's 9x9 interior -- everything but the core, 72 rooms of the stock world
+ * Every room of the old W1N1 through W9N9 interior -- everything but the core, 72 rooms
  * -- is overwritten with one generated template, and given the same sources, mineral and controller
  * on the same tiles, so no room is a better start than another. The terrain is `generate-room`'s own
  * generator (`template.ts` has the layouts, the exits and the one repair it can make) and the object
@@ -26,7 +27,7 @@ import {
  *   - the terrain blob, once, with the world's terrain from before it put aside;
  *   - the room blob of every covered room whose objects changed, with its own before state put aside.
  *
- * `--restore` lifts both back. A room is only touched when its objects are not already the plan's,
+ * `--restore` merges only old-sector records back. A room is only touched when its objects are not already the plan's,
  * and the plan is a function of the template, so a second run of the same template writes nothing.
  */
 
@@ -45,7 +46,7 @@ export interface UniformRequest {
 	exitWidth?: number;
 	/** A template to stamp instead of generating one: 625 packed bytes, the format the engine holds. */
 	template?: Readonly<Uint8Array>;
-	/** Whether the highway ring's inward faces are opened too. Default true. */
+	/** Retained for command compatibility; the season-1 layout no longer includes highways. */
 	ringEdges?: boolean;
 	/** Whether the faces which look at a core are kept shut. Default true. */
 	sealCore?: boolean;
@@ -162,9 +163,9 @@ export async function applyUniformTerrain(
 	request: UniformRequest,
 	options: { dryRun?: boolean } = {},
 ): Promise<UniformReport> {
-	const world = await shard.loadWorld();
+	let world = await shard.loadWorld();
 	const core = sectorCoreRooms(world.terrain);
-	const layout = uniformLayout(world.terrain, core);
+	let layout = uniformLayout(world.terrain, core);
 	if (layout.core.length === 0 || layout.rooms.length === 0) {
 		throw new Error('this world has no sector records, so there is no interior to cover');
 	}
@@ -231,6 +232,10 @@ export async function applyUniformTerrain(
 	// `scripts/manage.ts` uses to write a room from outside the game loop.
 	await using gameMutex = await Mutex.connect('game', shard.data, shard.pubsub);
 	await using lock = await gameMutex.acquire();
+	// Re-read under the lock so serializing the shared world cannot revert another sector's edit.
+	world = await shard.loadWorld();
+	layout = uniformLayout(world.terrain, sectorCoreRooms(world.terrain));
+	report.covered = layout.rooms.length;
 	const time = Number(await shard.data.get('time'));
 	if (!isUniform(world.terrain, template, layout, sealing)) {
 		// Rollback material: the world's terrain as it is now, written once and never overwritten.
@@ -296,11 +301,18 @@ export async function restoreUniform(shard: Shard) {
 	if (backup === null) {
 		return { terrain: false, rooms: 0 };
 	}
-	const world = await shard.loadWorld();
-	const layout = uniformLayout(world.terrain, sectorCoreRooms(world.terrain));
 	await using gameMutex = await Mutex.connect('game', shard.data, shard.pubsub);
 	await using lock = await gameMutex.acquire();
-	await shard.data.set('terrain', backup);
+	const world = await shard.loadWorld();
+	const saved = new World(shard.name, backup);
+	// A historical backup may predate other seasons. Restore only existing season-1 records.
+	for (const [ name, record ] of saved.terrain) {
+		if (isSpeedrunRoom(name) && world.terrain.has(name)) {
+			world.terrain.set(name, record);
+		}
+	}
+	await shard.data.set('terrain', makeWriter(worldSchema)(world.terrain));
+	const layout = uniformLayout(world.terrain, sectorCoreRooms(world.terrain));
 	let rooms = 0;
 	for (const name of layout.rooms) {
 		const slots = await Promise.all([ 0, 1 ].map(slot =>

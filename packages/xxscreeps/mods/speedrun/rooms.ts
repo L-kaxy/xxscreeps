@@ -1,6 +1,7 @@
 import type { SectorControl } from 'xxscreeps/mods/modern/sector/schema.js';
 import { makeSignedRoomName, parseSignedRoomName } from 'xxscreeps/game/room/name.js';
 import { roomType } from 'xxscreeps/mods/modern/sector/terrain.js';
+import { isSpeedrunRoom } from './scope.js';
 
 /**
  * A loaded shard's terrain records -- `(await shard.loadWorld()).terrain`, the same records
@@ -9,8 +10,8 @@ import { roomType } from 'xxscreeps/mods/modern/sector/terrain.js';
 export type WorldTerrain = ReadonlyMap<string, { sectorControl?: SectorControl | undefined }>;
 
 /**
- * The rooms of every sector core: the center room plus its eight neighbours, i.e. the central 3x3 of
- * each sector. The walls rule and the closure rule work off this same geometry; the only difference
+ * The old sector core W4N4 through W6N6. Other sectors are never selected.
+ * The walls rule and the closure rule work off this same geometry; the only difference
  * between them is which rooms they are allowed to pick.
  *
  * The world already carries that geometry: `sectorControl` is stamped on every center room when the
@@ -21,7 +22,7 @@ export type WorldTerrain = ReadonlyMap<string, { sectorControl?: SectorControl |
  * and getting it wrong shifts the whole 3x3 one room diagonally.
  */
 export function sectorCoreRooms(terrain: WorldTerrain): string[] {
-	const inside = new Set(terrain.keys());
+	const inside = new Set([ ...terrain.keys() ].filter(isSpeedrunRoom));
 	const centers = sectorCenters(terrain);
 	// A world with no sector records at all -- a hand-built test fixture, or a shard imported without
 	// the sector mod -- has no geometry to read, so fall back to the classifier the generator itself
@@ -30,20 +31,20 @@ export function sectorCoreRooms(terrain: WorldTerrain): string[] {
 }
 
 /**
- * The sector cores, restricted to rooms which the caller listed. Rooms absent from `open` -- already
+ * The old sector core, restricted to rooms which the caller listed. Rooms absent from `open` -- already
  * closed, or outside the world -- are never returned, so this can drop rooms from the world but
  * never invent one.
  */
 export function roomsToClose(terrain: WorldTerrain, open: Iterable<string>): string[] {
-	const openSet = new Set(open);
+	const openSet = new Set([ ...open ].filter(isSpeedrunRoom));
 	const centers = sectorCenters(terrain);
-	return centers.length === 0 ? classifyByRoomType(open) : coreAround(centers, openSet);
+	return centers.length === 0 ? classifyByRoomType(openSet) : coreAround(centers, openSet);
 }
 
 function sectorCenters(terrain: WorldTerrain): string[] {
 	const centers = [];
 	for (const [ name, { sectorControl } ] of terrain) {
-		if (sectorControl !== undefined) {
+		if (isSpeedrunRoom(name) && sectorControl !== undefined) {
 			centers.push(name);
 		}
 	}

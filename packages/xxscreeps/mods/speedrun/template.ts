@@ -4,6 +4,7 @@ import { makeSignedRoomName, parseSignedRoomName } from 'xxscreeps/game/room/nam
 import { TERRAIN_MASK_SWAMP, TERRAIN_MASK_WALL, getBuffer, isBorder, packExits } from 'xxscreeps/game/terrain.js';
 import { shuffle } from 'xxscreeps/utility/random.js';
 import { hashCombine } from 'xxscreeps/utility/utility.js';
+import { isSpeedrunRoom } from './scope.js';
 
 /**
  * One room template, stamped over every room of a sector's interior.
@@ -514,40 +515,30 @@ function edgeTiles(edge: { row: number; column: number }): [ number, number ][] 
 }
 
 /**
- * Splits the world's rooms into the cores, the interiors a template covers, and the ring. Reads the
- * geometry out of the world's own sector records -- `sectorControl.members` is each sector's 9x9
- * interior and `.edges` its highway ring -- so a world of several sectors needs no further
- * configuration.
+ * Selects the old sector's core and 72 covered rooms from its sector records. Other sectors and
+ * the highway ring remain outside the layout, so a uniform stamp cannot change another season.
  */
 export function uniformLayout<Record extends { sectorControl?: SectorControl | undefined }>(
 	terrain: ReadonlyMap<string, Record>,
 	core: Iterable<string>,
 ): UniformLayout {
-	const coreSet = new Set([ ...core ].filter(name => terrain.has(name)));
+	const coreSet = new Set([ ...core ].filter(name => isSpeedrunRoom(name) && terrain.has(name)));
 	const rooms = new Set<string>();
-	const ring = new Set<string>();
-	for (const { sectorControl } of terrain.values()) {
-		if (sectorControl === undefined) {
+	for (const [ name, { sectorControl } ] of terrain) {
+		if (!isSpeedrunRoom(name) || sectorControl === undefined) {
 			continue;
 		}
 		for (const member of sectorControl.members) {
-			if (terrain.has(member)) {
+			if (isSpeedrunRoom(member) && terrain.has(member)) {
 				rooms.add(member);
-			}
-		}
-		for (const edge of sectorControl.edges) {
-			if (terrain.has(edge)) {
-				ring.add(edge);
 			}
 		}
 	}
 	for (const name of coreSet) {
 		rooms.delete(name);
 	}
-	for (const name of rooms) {
-		ring.delete(name);
-	}
-	return { core: [ ...coreSet ], rooms: [ ...rooms ], ring: [ ...ring ] };
+	// Highways lie outside the season. Even --ring-edges may not rewrite them.
+	return { core: [ ...coreSet ], rooms: [ ...rooms ], ring: [] };
 }
 
 function paint(buffer: Uint8Array, xx: number, yy: number, value: number) {

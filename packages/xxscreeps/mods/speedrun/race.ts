@@ -1,8 +1,11 @@
 import type { Shard } from 'xxscreeps/engine/db/shard.js';
 import { config } from 'xxscreeps/config/index.js';
 import * as User from 'xxscreeps/engine/db/user/index.js';
+import { primitiveComparator } from 'xxscreeps/functional/comparator.js';
+import { controlledRoomsKey } from 'xxscreeps/mods/classic/controller/model.js';
 import { respawnPlayer } from 'xxscreeps/mods/classic/spawn/model.js';
 import * as C from 'xxscreeps:mods/constants';
+import { isSpeedrunRoom } from './scope.js';
 
 // Racing results: how far a player's room had come a fixed number of ticks after they landed in it.
 //
@@ -115,7 +118,7 @@ export function controlPointsOf(level: number, progress: number) {
  */
 export async function startRun(shard: Shard, userId: string, roomName: string, time: number): Promise<number | undefined> {
 	const brackets = raceBrackets();
-	if (brackets.length === 0) {
+	if (!isSpeedrunRoom(roomName) || brackets.length === 0) {
 		return undefined;
 	}
 	const previous = await shard.db.data.hGet(runKey(userId), 'run');
@@ -134,6 +137,25 @@ export async function startRun(shard: Shard, userId: string, roomName: string, t
 		shard.data.zAdd(racingKey, [ [ time, runIdOf(userId, run) ] ]),
 	]);
 	return run;
+}
+
+/** End the old clock when a player lands outside season 1, without deleting historical results. */
+export async function stopRun(shard: Shard, userId: string, time: number) {
+	const info = await shard.db.data.hGetAll(runKey(userId));
+	if (info.run === undefined) {
+		return;
+	}
+	const run = Number(info.run);
+	const due = await shard.data.zRange(dueRunsKey, -Infinity, Infinity, { by: 'SCORE' });
+	const members = due.filter(member => {
+		const parsed = parseDueMember(member);
+		return parsed?.userId === userId && parsed.run === run;
+	});
+	await Promise.all([
+		shard.db.data.hSet(runKey(userId), 'endedTick', String(time)),
+		shard.data.zRem(racingKey, [ runIdOf(userId, run) ]),
+		members.length === 0 ? undefined : shard.data.zRem(dueRunsKey, members),
+	]);
 }
 
 /**
@@ -155,9 +177,12 @@ export async function captureBracket(shard: Shard, member: string, time: number)
 	const { bracket, run, userId } = parsed;
 	const runId = runIdOf(userId, run);
 	const runInfo = await shard.db.data.hGetAll(runKey(userId));
-	if (Number(runInfo.run ?? 0) !== run || runInfo.room === undefined) {
+	if (Number(runInfo.run ?? 0) !== run || runInfo.room === undefined || !isSpeedrunRoom(runInfo.room)) {
 		// A later landing took over, or the run was never recorded.
 		await shard.data.zRem(racingKey, [ runId ]);
+		return undefined;
+	}
+	if (runInfo.endedTick !== undefined) {
 		return undefined;
 	}
 	const room = await shard.loadRoom(runInfo.room).catch(() => undefined);
@@ -196,9 +221,10 @@ export async function captureBracket(shard: Shard, member: string, time: number)
 		user: userId,
 		username,
 	};
-	const best = await shard.db.data.zScore(bestKey(bracket), userId);
+	// An older out-of-sector result must not prevent this room's first valid best.
+	const best = (await readBest(shard, bracket, userId))?.score;
 	// The list page shows one row per player, so a run which is not an improvement only adds a record.
-	const improves = best === null || controlPoints > best;
+	const improves = best === undefined || controlPoints > best;
 	await Promise.all([
 		...Object.entries(fields).map(([ field, value ]) =>
 			shard.db.data.hSet(scoreKey(bracket, runId), field, value)),
@@ -273,9 +299,15 @@ async function resetRun(shard: Shard, runId: string, time: number) {
 		shard.db.data.hGetAll(runKey(userId)),
 		shard.db.data.hGet(User.infoKey(userId), 'username'),
 	]);
-	if (Number(info.run ?? 0) !== run || username === null) {
+	if (Number(info.run ?? 0) !== run || username === null || !isSpeedrunRoom(info.room)) {
 		// A later landing took over, or the account is gone: there is nobody to hand over.
 		await shard.data.zRem(racingKey, [ runId ]);
+		return;
+	}
+	const controlled = await shard.scratch.sMembers(controlledRoomsKey(userId));
+	if (controlled.some(name => !isSpeedrunRoom(name))) {
+		// A newer landing may have come through a different mod or an administrative import.
+		await stopRun(shard, userId, time);
 		return;
 	}
 	const endedTick = info.endedTick === undefined ? undefined : Number(info.endedTick);
@@ -373,12 +405,14 @@ function parseRecord(fields: Record<string, string>): RaceRecord {
  */
 async function readBest(shard: Shard, bracket: number, userId: string) {
 	const runs = await shard.db.data.zRangeWithScores(
-		playerRunsKey(bracket, userId), -Infinity, Infinity, { by: 'SCORE' });
-	const run = runs[runs.length - 1];
-	if (run === undefined) {
-		return undefined;
+		playerRunsKey(bracket, userId), Infinity, -Infinity, { by: 'SCORE', rev: true });
+	for (const [ , run ] of runs) {
+		const fields = await shard.db.data.hGetAll(scoreKey(bracket, runIdOf(userId, Number(run))));
+		if (isSpeedrunRoom(fields.room)) {
+			return parseRecord(fields);
+		}
 	}
-	return parseRecord(await shard.db.data.hGetAll(scoreKey(bracket, runIdOf(userId, Number(run[1])))));
+	return undefined;
 }
 
 export interface LeaderboardEntry {
@@ -392,24 +426,26 @@ export interface LeaderboardEntry {
 /** One page of a bracket: one row per player, their best result, highest first. */
 export async function readLeaderboard(shard: Shard, bracket: number, offset: number, limit: number) {
 	const key = bestKey(bracket);
-	const [ count, page ] = await Promise.all([
-		shard.db.data.zCard(key),
-		shard.db.data.zRangeWithScores(key, offset, offset + limit - 1, { rev: true }),
-	]);
-	const list = await Promise.all(page.map(async ([ score, user ], index): Promise<LeaderboardEntry> => ({
-		rank: offset + index,
-		record: await readBest(shard, bracket, user),
-		score,
-		user,
-	})));
-	return { count, list };
+	// Filter before pagination: historical global entries must not consume a page slot or rank.
+	const candidates = await shard.db.data.zRange(key, 0, -1, { rev: true });
+	const records = await Promise.all(candidates.map(async user => ({ user, record: await readBest(shard, bracket, user) })));
+	const valid = records.flatMap(({ user, record }) =>
+		record === undefined ? [] : [ { user, record, score: record.score } ]);
+	valid.sort((left, right) => right.score - left.score || primitiveComparator(right.user, left.user));
+	const list: LeaderboardEntry[] = valid.slice(offset, offset + limit)
+		.map((entry, index) => ({ ...entry, rank: offset + index }));
+	return { count: valid.length, list };
 }
 
 /** The brackets a player has results in, with their best score in each, lowest bracket first. */
 export async function readPlayerBrackets(shard: Shard, userId: string) {
 	const brackets = await shard.db.data.hGetAll(playerBracketsKey(userId));
-	return Object.entries(brackets)
-		.map(([ bracket, score ]) => ({ bracket: Number(bracket), score: Number(score) }))
+	const best = await Promise.all(Object.keys(brackets).map(async value => {
+		const bracket = Number(value);
+		const record = await readBest(shard, bracket, userId);
+		return record === undefined ? [] : [ { bracket, score: record.score } ];
+	}));
+	return best.flat()
 		.sort((left, right) => left.bracket - right.bracket);
 }
 
@@ -425,17 +461,21 @@ export interface PlayerRecord {
 /** Every result a player holds, best first within each bracket. */
 export async function readPlayerRecords(shard: Shard, userId: string, brackets: readonly number[]) {
 	const lists = await Promise.all(brackets.map(async bracket => {
+		const rankedRuns = await shard.db.data.zRange(rankKey(bracket), 0, -1, { rev: true });
+		const rankedRooms = await Promise.all(rankedRuns.map(runId => shard.db.data.hGet(scoreKey(bracket, runId), 'room')));
+		const ranks = new Map(rankedRuns.filter((_runId, index) => isSpeedrunRoom(rankedRooms[index] ?? undefined))
+			.map((runId, index) => [ runId, index ]));
 		const runs = await shard.db.data.zRangeWithScores(
 			playerRunsKey(bracket, userId), -Infinity, Infinity, { by: 'SCORE' });
-		const records = await Promise.all(runs.reverse().map(async ([ score, run ]): Promise<PlayerRecord> => {
+		const records = await Promise.all(runs.reverse().map(async ([ score, run ]): Promise<PlayerRecord | undefined> => {
 			const runId = runIdOf(userId, Number(run));
-			const [ fields, rank ] = await Promise.all([
-				shard.db.data.hGetAll(scoreKey(bracket, runId)),
-				shard.db.data.zRank(rankKey(bracket), runId, { rev: true }),
-			]);
-			return { bracket, rank, record: parseRecord(fields), score };
+			const fields = await shard.db.data.hGetAll(scoreKey(bracket, runId));
+			if (!isSpeedrunRoom(fields.room)) {
+				return undefined;
+			}
+			return { bracket, rank: ranks.get(runId) ?? null, record: parseRecord(fields), score };
 		}));
-		return records;
+		return records.flatMap(record => record === undefined ? [] : [ record ]);
 	}));
 	return lists.flat();
 }
@@ -470,7 +510,7 @@ export async function readRacing(shard: Shard, time: number) {
 		const { run, userId } = parseRunId(runId);
 		const info = await shard.db.data.hGetAll(runKey(userId));
 		const roomName = info.room;
-		if (Number(info.run ?? 0) !== run || roomName === undefined) {
+		if (Number(info.run ?? 0) !== run || roomName === undefined || !isSpeedrunRoom(roomName)) {
 			// A later landing took over: this entry describes a run which is over.
 			stale.push(runId);
 			return undefined;

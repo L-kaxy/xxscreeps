@@ -54,16 +54,12 @@ registerShardInitializer(async shard => {
 	if (core.length === 0 || isSolid(world.terrain, core)) {
 		return;
 	}
+	// Terrain entries can write through to the world blob. Save rollback material before painting.
+	if (await shard.data.get('speedrun/terrainBackup', { blob: true }) === null) {
+		await shard.data.set('speedrun/terrainBackup', Uint8Array.from(world.terrainBlob));
+	}
 	const touched = wallSectorCores(world.terrain, core);
-	await Promise.all([
-		// Rollback material, written once and never overwritten.
-		(async () => {
-			if (await shard.data.get('speedrun/terrainBackup', { blob: true }) === null) {
-				await shard.data.set('speedrun/terrainBackup', world.terrainBlob);
-			}
-		})(),
-		shard.data.set('terrain', makeWriter(worldSchema)(world.terrain)),
-	]);
+	await shard.data.set('terrain', makeWriter(worldSchema)(world.terrain));
 	console.log(`speedrun: walled ${core.length} core rooms and sealed ${touched.length - core.length} rooms around them`);
 });
 

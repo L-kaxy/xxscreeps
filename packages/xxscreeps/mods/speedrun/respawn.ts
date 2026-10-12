@@ -8,6 +8,7 @@ import { Creep } from 'xxscreeps/mods/classic/creep/creep.js';
 import { StructureWall } from 'xxscreeps/mods/classic/defense/wall.js';
 import { StructureContainer } from 'xxscreeps/mods/classic/resource/container.js';
 import { StructureRoad } from 'xxscreeps/mods/classic/road/road.js';
+import { isSpeedrunRoom } from './scope.js';
 
 // A respawn hands a player's rooms back to the world (`mods/classic/spawn/processor.ts:93-108`):
 // every object the leaving player owns is taken out of the room and the controller is released. The
@@ -87,7 +88,7 @@ const unspawn = intentProcessors.find(info => info.intent === 'unspawn' && info.
 if (unspawn) {
 	const handover = unspawn.process;
 	unspawn.process = (room: Room, context: ProcessorContext, ...data: unknown[]) => {
-		if (config.speedrun?.respawnCleanup !== false) {
+		if (isSpeedrunRoom(room.name) && config.speedrun?.respawnCleanup !== false) {
 			clearLeftovers(room, context);
 		}
 		handover(room, context, ...data);
