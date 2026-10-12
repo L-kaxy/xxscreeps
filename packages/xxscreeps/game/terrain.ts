@@ -20,7 +20,8 @@ export const terrainMaskToString = [ 'plain', 'wall', 'swamp', 'wall' ] as const
  */
 export class Terrain {
 	// The room's 2500 tiles packed into 625 bytes: two bits per tile, four tiles per byte from the
-	// low end, indexed row-major as `yy * 50 + xx`. Each pair holds the value `get` returns.
+	// low end, indexed row-major as `yy * 50 + xx`. Each pair holds the raw terrain mask; `get`
+	// normalizes wall+swamp to wall without changing the stored bits.
 	readonly #buffer: Uint8Array;
 
 	/**
@@ -59,13 +60,15 @@ export class Terrain {
 	 *  - 0: terrain is `plain`.
 	 *  - `TERRAIN_MASK_WALL`: terrain is `wall`.
 	 *  - `TERRAIN_MASK_SWAMP`: terrain is `swamp`.
+	 * If the raw terrain contains both wall and swamp bits, returns `TERRAIN_MASK_WALL`.
 	 * @public
 	 * @see https://docs.screeps.com/api/#Room.Terrain.get
 	 */
 	get(xx: number, yy: number) {
 		const index = yy * 50 + xx;
 		if (index >= 0 && index < 2500) {
-			return (this.#buffer[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03;
+			const mask = (this.#buffer[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03;
+			return mask & C.TERRAIN_MASK_WALL ? C.TERRAIN_MASK_WALL : mask;
 		}
 		return NaN;
 	}
@@ -74,6 +77,8 @@ export class Terrain {
 	 * Get copy of underlying static terrain buffer. Each element is an integer number, terrain type
 	 * can be obtained by applying bitwise AND (`&`) operator with appropriate `TERRAIN_MASK_*`
 	 * constant. Room tiles are stored **row by row**.
+	 * Unlike `get`, this preserves combined wall and swamp bits. Such tiles are walls; check the
+	 * `TERRAIN_MASK_WALL` bit before considering the swamp bit.
 	 *
 	 * Note: It's probably better to just use the `get` method.
 	 *

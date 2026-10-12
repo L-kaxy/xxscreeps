@@ -38,6 +38,7 @@ import { roomsToClose, sectorCoreRooms } from './rooms.js';
 import { isSpeedrunRoom } from './scope.js';
 import './race-core-test.js';
 import './scope-test.js';
+import './terrain-test.js';
 import { applyUniform, generateTemplate, hasStandingRoom, isUniform, objectPlan, templateExitWidth, templateExits, uniformLayout } from './template.js';
 import { applyUniformTerrain, restoreUniform } from './uniform.js';
 import { isSolid, wallSectorCores } from './walls.js';

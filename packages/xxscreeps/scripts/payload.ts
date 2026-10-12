@@ -37,8 +37,7 @@ interface ExportedPayload {
 	dropped: RoomObject[];
 }
 
-// Index 3 is wall+swamp, which reads back as wall: `Terrain.get` documents three values, and
-// `packExits` would read anything else as a border opening.
+// Index 3 is the legacy wall+swamp marker. Both the importer and Terrain.get treat it as wall.
 const terrainMask = [ ' ', '#', ',', '?' ];
 const terrainValues = [ 0, C.TERRAIN_MASK_WALL, C.TERRAIN_MASK_SWAMP, C.TERRAIN_MASK_WALL ];
 

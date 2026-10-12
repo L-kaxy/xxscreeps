@@ -10,6 +10,7 @@ import { lookForStructures } from 'xxscreeps/mods/classic/structure/structure.js
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
 import { Creep, create } from './creep.js';
+import './terrain-test.js';
 
 describe('mods/classic/creep', () => {
 	describe('death', () => {
