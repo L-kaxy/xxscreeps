@@ -103,19 +103,24 @@ describe('season-1 scope', () => {
 		assert.strictEqual(await peekRoom('W12N1', room => room['#objects'].filter(object => object instanceof Ruin).length), 1);
 	}));
 
-	for (const enabled of [ false, true ]) {
-		test(`old-sector resource placement follows its own switch: ${enabled}`, () => simulate({})(async ({ shard, tick, peekRoom }) => {
+	for (const [ deposits, powerBanks ] of [ [ false, false ], [ true, false ], [ false, true ], [ true, true ] ] as const) {
+		test(`global resource switches stay independent: deposits=${deposits}, powerBanks=${powerBanks}`, () => simulate({})(async ({ shard, tick, peekRoom }) => {
 			const settings = config.speedrun!;
 			const previous = { deposits: settings.deposits, powerBanks: settings.powerBanks };
-			settings.deposits = settings.powerBanks = enabled;
+			settings.deposits = deposits;
+			settings.powerBanks = powerBanks;
 			try {
-				await pushIntentsForRoomNextTick(shard, 'W3N3', '100', {
-					local: { placeDeposit: [ [ C.RESOURCE_MIST, 'W5N5' ] ], placePowerBank: [ [ 1000, 50000 ] ] },
-					internal: true,
-				});
+				for (const name of [ 'W3N3', 'W0N0' ]) {
+					await pushIntentsForRoomNextTick(shard, name, '100', {
+						local: { placeDeposit: [ [ C.RESOURCE_MIST, 'W5N5' ] ], placePowerBank: [ [ 1000, 50000 ] ] },
+						internal: true,
+					});
+				}
 				await tick(2);
-				assert.strictEqual(await peekRoom('W3N3', room => room.find(C.FIND_DEPOSITS).length > 0), enabled);
-				assert.strictEqual(await peekRoom('W3N3', room => room['#objects'].some(object => object instanceof StructurePowerBank)), enabled);
+				for (const name of [ 'W3N3', 'W0N0' ]) {
+					assert.strictEqual(await peekRoom(name, room => room.find(C.FIND_DEPOSITS).length > 0), deposits, `${name} follows the global deposit switch`);
+					assert.strictEqual(await peekRoom(name, room => room['#objects'].some(object => object instanceof StructurePowerBank)), powerBanks, `${name} follows the global power bank switch`);
+				}
 			} finally {
 				for (const key of [ 'deposits', 'powerBanks' ] as const) {
 					if (previous[key] === undefined) {

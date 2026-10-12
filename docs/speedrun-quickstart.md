@@ -25,13 +25,13 @@ docker exec -i xxscreeps /xxscreeps/node_modules/.bin/xxscreeps uniform-terrain 
 
 ## 1. 这套规则集做了什么
 
-赛季 1 的作用范围固定为 **`W1N1～W9N9`**。下列地图和玩法调整、初始落地后的比赛计时及榜单只处理这个区块；highway 和其他区块不受旧配置影响。玩家本身的 respawn 仍清理该玩家全部房间，但额外的无主建筑清理只作用于旧区块。
+赛季 1 的作用范围固定为 **`W1N1～W9N9`**。地图调整、Invader、废墟、claim、初始落地后的比赛计时及榜单只处理这个区块；**deposit 和 power bank 的生成开关仍全图生效**，包括 highway 和其他区块。玩家本身的 respawn 仍清理该玩家全部房间，但额外的无主建筑清理只作用于旧区块。
 
 | 干什么 | 效果 |
 |---|---|
 | **统一地形** | 把旧区块的 72 个非核心房间刷成**同一套地形**（同一套源/矿物/控制器落位）；不再改写 highway 或其他区块 |
 | **封核心** | 仅 `W4N4～W6N6` 关闭、封墙，与核心共边的旧区块房间封住朝核心的边；其他分区中央九房保持原状 |
-| **去掉随机事件** | 旧区块内的定期入侵、deposit、power bank 生成关闭；旧区块结构被摧毁不留废墟；区块外保留原版机制 |
+| **去掉随机事件** | 旧区块内的定期入侵关闭、结构被摧毁不留废墟；deposit 和 power bank 生成仍全图关闭 |
 | **禁占房** | `claimController` 禁用 ⇒ 只能在自己落地那间房发展（房间归属靠落地，不靠占控制器） |
 | **竞速成绩** | 每次落地开始一局；开局后 **20000 / 40000 tick** 各记一次成绩（RCL + 控制点）；满 **40000 tick 自动交还**（和点客户端 respawn 按钮同一个实现）：房间、物件、控制器全部交回世界，玩家自己再找地方落地 |
 | **成绩榜页面** | `/speedrun`：上方「Racing now」实时榜（直接读房间），下方左右两块 **20k / 40k** 累计榜；点玩家看该玩家全部记录；客户端侧边栏有入口（新标签打开） |
@@ -113,8 +113,8 @@ mods:
 ```yaml
 speedrun:
   invaders: false          # 定期入侵：关（房间的 harvest 预算每 tick 清零）
-  deposits: false          # deposit 生成：关
-  powerBanks: false        # power bank 生成：关
+  deposits: false          # deposit 生成：全图关
+  powerBanks: false        # power bank 生成：全图关
   ruins: false             # 结构被摧毁留废墟：关
   claimController: false   # 允许占中立控制器：关（禁占房）
   closeCenterNine: true    # 核心 3×3 房间关闭：开
