@@ -34,6 +34,7 @@ import {
 } from './race.js';
 import { roomsToClose, sectorCoreRooms } from './rooms.js';
 import { isSpeedrunRoom } from './scope.js';
+import './race-core-test.js';
 import './scope-test.js';
 import { applyUniform, generateTemplate, hasStandingRoom, isUniform, objectPlan, templateExitWidth, templateExits, uniformLayout } from './template.js';
 import { applyUniformTerrain, restoreUniform } from './uniform.js';
@@ -1281,6 +1282,8 @@ describe('uniform rooms', () => {
 		// `room-gen` answers by rerolling the layout. A template cannot: it carves the exits into the
 		// main region instead, and keeps the layout the operator asked for.
 		for (const terrainType of [ 8, 15 ]) {
+			// These samples need repair; a fresh random layout can legitimately converge instead.
+			using random = deterministicRandomForTesting(1);
 			const { terrain, repaired } = generateTemplate({ ...spec, terrainType });
 			assert.strictEqual(repaired, true, `layout ${terrainType} leaves the room in pieces`);
 			assertTemplate(terrain);
@@ -1346,8 +1349,9 @@ describe('uniform rooms', () => {
 		const before = snapshot();
 		applyUniform(terrain, template, layout, { ringEdges: true, sealCore: true });
 		assert.strictEqual(snapshot(), before, 'a second pass is a no-op');
-		inside.terrain.set(20, 20, TERRAIN_MASK_WALL);
-		assert.strictEqual(isUniform(terrain, template, layout, { ringEdges: true, sealCore: true }), false, 'one walled tile is detected');
+		const previousTile = inside.terrain.get(20, 20);
+		inside.terrain.set(20, 20, previousTile === TERRAIN_MASK_WALL ? 0 : TERRAIN_MASK_WALL);
+		assert.strictEqual(isUniform(terrain, template, layout, { ringEdges: true, sealCore: true }), false, 'one changed tile is detected');
 	});
 });
 
