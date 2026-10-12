@@ -469,7 +469,7 @@ export function templateExitWidth(template: Readonly<Uint8Array>): number {
 	let length = 0;
 	for (let xx = 1; xx < kGridSize - 1; ++xx) {
 		const index = xx;
-		if (((template[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03) !== TERRAIN_MASK_WALL) {
+		if (((template[index >>> 2]! >>> ((index & 0x03) << 1)) & TERRAIN_MASK_WALL) === 0) {
 			length++;
 		}
 	}
@@ -643,7 +643,7 @@ export function isUniform<Record extends TerrainEntry>(
 		}
 		const buffer = getBuffer(record.terrain);
 		for (const index of tiles) {
-			if (((buffer[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03) === TERRAIN_MASK_WALL) {
+			if (((buffer[index >>> 2]! >>> ((index & 0x03) << 1)) & TERRAIN_MASK_WALL) !== 0) {
 				return false;
 			}
 		}
@@ -713,7 +713,7 @@ export function hasStandingRoom(template: Readonly<Uint8Array>, xx: number, yy: 
 	for (const [ nxx, nyy ] of iterateInRange(xx, yy, 1)) {
 		if (nxx !== xx || nyy !== yy) {
 			const index = nyy * kGridSize + nxx;
-			if (((template[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03) !== TERRAIN_MASK_WALL) {
+			if (((template[index >>> 2]! >>> ((index & 0x03) << 1)) & TERRAIN_MASK_WALL) === 0) {
 				return true;
 			}
 		}
@@ -781,7 +781,8 @@ const kMineralSeparation = [ 5, 4, 3, 2, 1 ];
 
 function terrainAt(template: Readonly<Uint8Array>, xx: number, yy: number) {
 	const index = yy * kGridSize + xx;
-	return (template[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03;
+	const mask = (template[index >>> 2]! >>> ((index & 0x03) << 1)) & 0x03;
+	return mask & TERRAIN_MASK_WALL ? TERRAIN_MASK_WALL : mask;
 }
 
 /**

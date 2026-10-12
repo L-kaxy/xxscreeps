@@ -92,8 +92,12 @@ describe('season-2 map', () => {
 		const { terrain } = makeMap();
 		for (const [ name, original ] of Object.entries(originalMap.rooms)) {
 			const copied = terrain.get(translateOriginalRoom(name))!.terrain;
+			const raw = copied.getRawBuffer();
 			for (let index = 0; index < 2500; ++index) {
-				assert.strictEqual(copied.get(index % 50, Math.floor(index / 50)), Number(original.terrain[index]), `${name}:${index}`);
+				const mask = Number(original.terrain[index]);
+				assert.strictEqual(raw[index], mask, `${name}:${index} preserves the original mask`);
+				assert.strictEqual(copied.get(index % 50, Math.floor(index / 50)),
+					mask & C.TERRAIN_MASK_WALL ? C.TERRAIN_MASK_WALL : mask, `${name}:${index} gives wall priority`);
 			}
 		}
 	});

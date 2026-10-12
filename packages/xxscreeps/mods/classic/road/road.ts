@@ -38,11 +38,14 @@ export class StructureRoad extends withOverlay(Structure, roadShape) {
 	override get '#pathCost'() { return 1; }
 
 	get '#multiplier'() {
-		switch (this['#terrain']) {
-			case C.TERRAIN_MASK_WALL: return C.CONSTRUCTION_COST_ROAD_WALL_RATIO;
-			case C.TERRAIN_MASK_SWAMP: return C.CONSTRUCTION_COST_ROAD_SWAMP_RATIO;
-			default: return 1;
+		// Existing roads may have persisted the raw wall+swamp mask before Terrain.get normalized it.
+		const terrain = this['#terrain'];
+		if (terrain & C.TERRAIN_MASK_WALL) {
+			return C.CONSTRUCTION_COST_ROAD_WALL_RATIO;
+		} else if (terrain & C.TERRAIN_MASK_SWAMP) {
+			return C.CONSTRUCTION_COST_ROAD_SWAMP_RATIO;
 		}
+		return 1;
 	}
 
 	override '#checkObstacle'() {
