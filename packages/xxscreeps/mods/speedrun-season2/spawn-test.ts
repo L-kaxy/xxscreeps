@@ -18,6 +18,7 @@ import { dueRunsKey, racingKey, runKey, scoreKey, startRun } from 'xxscreeps/mod
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import { initializeSeason2Map } from './map.js';
 import { season2MapRooms } from './original-map.js';
+import * as Season2 from './race.js';
 import { allowsInitialSpawn, spawnRoomError } from './rooms.js';
 import 'xxscreeps:mods/backend';
 
@@ -89,6 +90,15 @@ async function assertNoSeason2Race(shard: Shard) {
 	assert.strictEqual(await shard.data.zCard('speedrun-season2/due'), 0);
 }
 
+async function assertSeason2Race(shard: Shard, user = '100') {
+	const info = await shard.db.data.hGetAll(Season2.runKey(user));
+	assert.strictEqual(info.run, '1');
+	assert.strictEqual(info.room, 'E3N3');
+	assert.strictEqual(info.endedTick, undefined);
+	assert.strictEqual(await shard.data.zCard(Season2.racingKey), 1);
+	assert.strictEqual(await shard.data.zCard(Season2.dueRunsKey), Season2.raceBrackets().length);
+}
+
 async function assertNotQueued(shard: Shard, name = 'E3N3') {
 	assert.deepStrictEqual(await acquireIntentsForRoom(shard, name), []);
 	assert.strictEqual(await shard.data.hGet(User.infoKey('100'), 'lastSpawnTime'), null);
@@ -154,6 +164,7 @@ describe('season-2 initial spawn', () => {
 		const tile = freeTile(world, await shard.loadRoom('E3N3'));
 		const body = request('E3N3', tile.x, tile.y);
 		assert.deepStrictEqual(await api(shard, world, body), { ok: 1 });
+		await assertNoSeason2Race(shard);
 		assert.ok(Number(await shard.data.hGet(User.infoKey('100'), 'lastSpawnTime')) > 0);
 		const room = await land(shard, world, 'E3N3', '100', true);
 		const spawns = room['#objects'].filter(object => object instanceof StructureSpawn);
@@ -163,7 +174,7 @@ describe('season-2 initial spawn', () => {
 		assert.deepStrictEqual([ spawns[0]!.pos.x, spawns[0]!.pos.y, spawns[0]!.name ], [ tile.x, tile.y, 'Spawn1' ]);
 		assert.ok((await shard.scratch.sMembers(userToIntentRoomsSetKey('100'))).includes('E3N3'));
 		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(runKey('100'))), []);
-		await assertNoSeason2Race(shard);
+		await assertSeason2Race(shard);
 	}));
 
 	test('the original API still coerces numeric coordinate strings for the allowed room', () => fresh(async ({ shard }) => {
@@ -184,7 +195,8 @@ describe('season-2 initial spawn', () => {
 		const room = await land(shard, world, 'E3N3', '101');
 		assert.strictEqual(room['#user'], '100');
 		assert.strictEqual(room['#objects'].filter(object => object instanceof StructureSpawn).length, 1);
-		await assertNoSeason2Race(shard);
+		await assertSeason2Race(shard);
+		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(Season2.runKey('101'))), []);
 	}));
 
 	test('two internal landings in one processor retain the ordinary first-owner rule', () => fresh(async ({ shard }) => {
@@ -211,7 +223,9 @@ describe('season-2 initial spawn', () => {
 		assert.ok(room['#user'] === '100' || room['#user'] === '101');
 		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(runKey('100'))), []);
 		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(runKey('101'))), []);
-		await assertNoSeason2Race(shard);
+		await assertSeason2Race(shard, room['#user']);
+		const loser = room['#user'] === '100' ? '101' : '100';
+		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(Season2.runKey(loser))), []);
 	}));
 
 	test('non-internal player payloads cannot invoke the original internal handover', () => fresh(async ({ shard }) => {
@@ -350,6 +364,6 @@ describe('season-2 initial spawn', () => {
 		assert.ok(run.endedTick !== undefined);
 		assert.strictEqual(await shard.data.zCard(racingKey), 0);
 		assert.strictEqual(await shard.data.zCard(dueRunsKey), 0);
-		await assertNoSeason2Race(shard);
+		await assertSeason2Race(shard);
 	}));
 });
