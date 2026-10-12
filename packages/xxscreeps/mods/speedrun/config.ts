@@ -1,4 +1,4 @@
-/** Season-1 settings; deposits and power banks remain global, as does player respawn. */
+/** Season-1 settings; resources, claim and ruins remain global, as does player respawn. */
 export interface SpeedrunSettings {
 	/**
 	 * Whether the periodic raid generator runs. With this off a room's harvest budget is cleared on
@@ -27,7 +27,7 @@ export interface SpeedrunSettings {
 	powerBanks?: boolean;
 
 	/**
-	 * Whether a destroyed structure leaves a ruin behind. With this off a ruin never reaches the
+	 * Whether a destroyed structure anywhere in the world leaves a ruin behind. With this off a ruin never reaches the
 	 * room: the object `Structure['#destroy']` and the two spawn intents hand to
 	 * `Room['#insertObject']` is dropped at the door (`processor.ts` explains why that one method
 	 * covers every lane), so nothing is left to loot and nothing is left to decay. The two spawn
@@ -92,7 +92,7 @@ export interface SpeedrunSettings {
 	respawnAfter?: number;
 
 	/**
-	 * Whether creeps may claim neutral controllers. With this off `Creep.claimController` returns
+	 * Whether creeps anywhere in the world may claim neutral controllers. With this off `Creep.claimController` returns
 	 * `ERR_INVALID_TARGET` before it records an intent, so no room in the world can change hands.
 	 * Nothing else about controllers changes: `reserveController`, `attackController` and
 	 * `upgradeController` still work, and the starting room the backend hands a new player is claimed
@@ -135,7 +135,7 @@ export interface SpeedrunSettings {
 
 export interface SpeedrunConfig {
 	/**
-	 * Season-1 ruleset settings for W1N1 through W9N9. Deposit and power bank switches remain global;
+	 * Season-1 ruleset settings for W1N1 through W9N9. Resource, claim and ruin switches remain global;
 	 * player respawn remains account-wide.
 	 */
 	speedrun?: SpeedrunSettings;

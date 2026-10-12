@@ -3,17 +3,12 @@
     "type": "object",
     "properties": {
         "speedrunSeason2": {
-            "description": "Independent settings for E1N1 through E9N9. Initial spawn and periodic Invaders are connected; other rules arrive in subsequent steps. Deposit and power bank switches remain global under speedrun.",
+            "description": "Independent settings for E1N1 through E9N9. Initial spawn and periodic Invaders are connected; other rules arrive in subsequent steps. Deposit, power bank, claimController and ruin switches remain global under speedrun.",
             "type": "object",
             "additionalProperties": false,
             "properties": {
                 "invaders": {
                     "description": "Whether periodic Invader generation runs in the season-2 block. Does not remove existing Invaders or disable Source Keepers or manual Invader requests.",
-                    "type": "boolean",
-                    "default": false
-                },
-                "ruins": {
-                    "description": "Whether destroyed structures in the season-2 block leave ruins.",
                     "type": "boolean",
                     "default": false
                 },
@@ -32,11 +27,6 @@
                     "description": "Run duration in ticks before automatic respawn. Zero or less disables automatic respawn.",
                     "type": "integer",
                     "default": 40000
-                },
-                "claimController": {
-                    "description": "Whether creeps in the season-2 block may claim other controllers.",
-                    "type": "boolean",
-                    "default": false
                 }
             }
         }

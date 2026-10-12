@@ -4,11 +4,11 @@
 
 在同一 shard 上保留赛季 1，按功能逐步开发、部署和验收赛季 2。详细规则见 [README.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/README.md)。
 
-**当前进度：第 0～4 步（含外围出口封墙）已由用户确认通过；第 5 步 Invader 独立控制已实现并完成专项及回归，等待用户验收，第 6 步尚未开始。**
+**当前进度：第 0～5 步（含外围出口封墙）已由用户确认通过；第 6、7 步已按最新要求合并实现，claim 与 Ruin 全图共用旧配置，专项及基线回归完成，等待用户验收；第 8 步尚未开始。**
 
 ## 执行和验收规则
 
-- 一步只修改当前功能，不夹带下一步的实现。
+- 一步只修改当前功能，不夹带下一步的实现；本轮按用户授权合并第 6、7 步。
 - 每步补充对应自动测试，运行相关赛季 1 回归；修改公共逻辑时运行完整回归。
 - 自动测试失败就在本步修复，重新通过后再交付用户验收。
 - 每步交付修改文件及原因、测试命令与结果、部署操作、配置变化、手动测试步骤、预期结果和回滚方法。
@@ -24,7 +24,7 @@
 - 原版私服初始地图按 `W{x}N{y} → E{10-x}N{y}` 平移，房内坐标不变；`W7N3 → E3N3`，不是镜像。
 - 直接写入原版地形和初始地图对象，不增加连通性、出口修复或落地空间校验。必要的格式、写入范围和对象 ID 处理不属于额外玩法校验。
 - 新区块中央九房不关闭、不封墙，正常运行。按追加要求，仅将外围普通房间朝封闭 highway 的整条边界封为地形墙；内部连接不封，不增加额外跨区 intent 检查。约定的四条 highway 保持关闭，不改造其地形。
-- Invader、claim、Ruin 等赛季玩法按所属区块和各自配置控制。
+- Invader 按所属区块和各自配置控制；**claim 与 Ruin 按最新要求全图生效，统一读取 `speedrun.claimController`、`speedrun.ruins`，不设独立配置。**
 - **deposit 和 power bank 继续由 `speedrun.deposits`、`speedrun.powerBanks` 全图控制**，赛季 2 不新增对应开关，不删除已有资源。
 - 玩家 respawn 保持全局退出；赛季 1 额外建筑清理保持原有语义；赛季 2 清理新区块全部人造建筑及施工点，不按 owner 或 presence 过滤。
 - 赛季 2 配置前缀为 `speedrunSeason2`，完整比赛存储前缀为 `speedrun-season2/*`；不混读、混写旧成绩。
@@ -103,26 +103,36 @@
 - [x] 在原版生成器之前处理预算；不删除已有 Invader，不禁用 Source Keeper。
 - [x] 自动测试：新旧开关的四种组合；区块外不受影响；旧预算不触发额外一波入侵。
 - [x] 交付：分别调整两个配置后的测试操作和预期结果，见 [STEP5.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP5.md)；主动 create-invader 保持原规则，不跟随周期生成开关。
-- [ ] 用户验收通过。
+- [x] 用户验收通过。
 
 自动测试结果：Invader 17/17、地图 28/28、封墙 13/13、落地 25/25、配置/加载 20/20；旧赛季及公共比赛在仅旧 mod、双 mod 下各 95/95，旧入侵组三项在两种加载方式下各重复四遍共 24/24。默认完整回归 667/667；仅旧 mod 740/761、双 mod 843/864，均保留与第 4 步基线完全相同的 21 项既有失败，无新增失败，不能标记完整混跑全部通过。
 
-仅修改旧测试的更新 intent 及地图 CLI 测试拆分以消除不稳定，没有修改旧运行规则、原版生成器或框架时限。TypeScript、赛季 2 严格 ESLint 通过；旧测试保持同名 16 项既有 warning、零 error。文档检查/预算夹具已在临时存档验证，未访问线上；等待用户确认本步通过。
+仅修改旧测试的更新 intent 及地图 CLI 测试拆分以消除不稳定，没有修改旧运行规则、原版生成器或框架时限。TypeScript、赛季 2 严格 ESLint 通过；旧测试保持同名 16 项既有 warning、零 error。文档检查/预算夹具已在临时存档验证，未访问线上。
 
-## 第 6 步 claim 独立控制
+用户确认：“通过，后面6和7步，claim 和 Ruin 的规则都改成全图生效，无需独立配置。两个一起改好。”
 
-- [ ] 将独立 claim 配置传入 sandbox，仅控制新区块内的 claimController。
-- [ ] 自动测试：默认禁止 claim；两个配置互不影响；其他区块保持原版规则。
-- [ ] 自动测试：reserveController、attackController、upgradeController 不受影响。
-- [ ] 交付：玩家脚本测试操作和预期返回值。
+## 第 6 步 claim 全图控制（与第 7 步一起交付）
+
+- [x] 复用旧 `speedrun.claimController` 及现有 sandbox payload，移除区块判断，不新增赛季 2 包装。
+- [x] 删除赛季 2 claim 类型、默认值和 schema 字段；旧 YAML 中对应键需要删除。
+- [x] 自动测试：默认全图禁止 claim；true 全图恢复原版检查；覆盖两赛季、其他区块和 highway。
+- [x] 自动测试：reserveController、attackController、upgradeController 不受影响。
+- [x] 交付：玩家脚本测试操作和预期返回值，见 [STEP6-7.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP6-7.md)。
 - [ ] 用户验收通过。
 
-## 第 7 步 Ruin 独立控制
+## 第 7 步 Ruin 全图控制（与第 6 步一起交付）
 
-- [ ] 新区块 Ruin 插入读取独立配置，避免新旧 mod 包装互相覆盖。
-- [ ] 自动测试：两个赛季分别开关正确；旧赛季不变；tombstone 不被误处理。
-- [ ] 交付：摧毁建筑和退出场景的测试操作。
+- [x] 复用旧 `speedrun.ruins` 插入包装，移除区块判断；关闭只阻止新增，不删除已有 Ruin。
+- [x] 删除赛季 2 Ruin 类型、默认值和 schema 字段，不新增包装或配置回退。
+- [x] 自动测试：两赛季、其他区块和 highway 一致；摧毁、退出、交接、存档及 tombstone 不被误处理。
+- [x] 交付：摧毁建筑和退出场景的测试操作，见 [STEP6-7.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP6-7.md)。
 - [ ] 用户验收通过。
+
+合并自动测试：全图规则 49/49；既有赛季 2 专项 103/103；旧赛季及公共比赛在仅旧 mod、双 mod 下各 99/99。默认完整 667/667；仅旧 mod 744/765、双 mod 896/917，保留第 5 步同名同序的 21 项既有失败，没有新增失败，不能标记整包混跑全部通过。TypeScript、赛季 2 及本轮修改代码严格 ESLint 通过；未修改的旧 test.ts 保持同名 16 项既有 warning、零 error。
+
+附加整包复跑发生两项既有地图 CLI 的 10 秒超时；地图组不改代码独立复核 28/28，最终整包仍为 896/917、21 项基线失败。中间日志与新专项 Memory 测试隔离修复记录一并保留于合并验收文档，不增加框架时限。
+
+部署必须删除旧 YAML 中 `speedrunSeason2.claimController`、`speedrunSeason2.ruins`，全部服务重启；无需地图操作或成绩迁移。只在测试副本验证，等待用户确认两步通过。
 
 ## 第 8 步 独立开局与跨赛季切换
 

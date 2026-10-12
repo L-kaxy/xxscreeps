@@ -18,6 +18,7 @@ import { computeRoomMeta } from 'xxscreeps/mods/modern/sector/terrain.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
+import { sandboxRules } from './game.js';
 import {
 	bestKey, captureBracket, dueRunsKey, playerBracketsKey, playerRunsKey, racingKey, rankKey,
 	readLeaderboard, readPlayerBrackets, readPlayerRecords, readRacing, resetExpiredRuns, runKey, scoreKey, startRun,
@@ -29,7 +30,7 @@ import { wallSectorCores } from './walls.js';
 
 describe('season-1 scope', () => {
 	// W12N1 is an existing all-plain fixture outside the old sector. Supply a controller to make
-	// its vanilla claiming, landing and respawn paths comparable to the old starting room.
+	// its global claiming rule, vanilla landing and respawn paths comparable to the old room.
 	const outside = simulate({
 		W12N1: room => {
 			const controller = createRoomObject(new StructureController(), new RoomPosition(33, 32, room.name));
@@ -96,12 +97,25 @@ describe('season-1 scope', () => {
 		assert.strictEqual(await peekRoom('W7N7', room => room.find(C.FIND_HOSTILE_CREEPS).filter(creep => creep['#user'] === '2').length), 0);
 	}));
 
-	test('outside rooms retain vanilla ruins', () => outside(async ({ poke, peekRoom }) => {
-		await poke('W12N1', '100', (_Game, room) => {
-			room['#insertObject'](createRuin(createSpawn(new RoomPosition(27, 25, room.name), '100', 'Ruined')));
-		});
-		assert.strictEqual(await peekRoom('W12N1', room => room['#objects'].filter(object => object instanceof Ruin).length), 1);
-	}));
+	for (const ruins of [ false, true ]) {
+		test(`outside ruins follow the global switch: ${ruins}`, () => outside(async ({ poke, peekRoom }) => {
+			const settings = config.speedrun!;
+			const previous = settings.ruins;
+			settings.ruins = ruins;
+			try {
+				await poke('W12N1', '100', (_Game, room) => {
+					room['#insertObject'](createRuin(createSpawn(new RoomPosition(27, 25, room.name), '100', 'Ruined')));
+				});
+				assert.strictEqual(await peekRoom('W12N1', room => room['#objects'].filter(object => object instanceof Ruin).length), Number(ruins));
+			} finally {
+				if (previous === undefined) {
+					delete settings.ruins;
+				} else {
+					settings.ruins = previous;
+				}
+			}
+		}));
+	}
 
 	for (const [ deposits, powerBanks ] of [ [ false, false ], [ true, false ], [ false, true ], [ true, true ] ] as const) {
 		test(`global resource switches stay independent: deposits=${deposits}, powerBanks=${powerBanks}`, () => simulate({})(async ({ shard, tick, peekRoom }) => {
@@ -133,12 +147,68 @@ describe('season-1 scope', () => {
 		}));
 	}
 
-	test('outside creeps use vanilla claimController even when season 1 forbids claiming', () => outside(async ({ player }) => {
-		await player('100', Game => {
-			Game.gcl = { level: 1, progress: 0, progressTotal: C.GCL_MULTIPLY, '#roomCount': 0 };
-			assert.strictEqual(Game.creeps.visitor!.claimController(Game.rooms.W12N1!.controller!), C.OK);
-		});
-	}));
+	for (const claimController of [ false, true ]) {
+		test(`outside claimController follows the global switch: ${claimController}`, () => outside(async ({ player, tick, peekRoom }) => {
+			const settings = config.speedrun!;
+			const previous = settings.claimController;
+			const previousSandboxRule = sandboxRules.claimController;
+			settings.claimController = claimController;
+			sandboxRules.claimController = claimController;
+			try {
+				await player('100', Game => {
+					Game.gcl = { level: 1, progress: 0, progressTotal: C.GCL_MULTIPLY, '#roomCount': 0 };
+					assert.strictEqual(Game.creeps.visitor!.claimController(Game.rooms.W12N1!.controller!), claimController ? C.OK : C.ERR_INVALID_TARGET);
+				});
+				await tick();
+				assert.strictEqual(await peekRoom('W12N1', room => room['#user']), claimController ? '100' : null);
+			} finally {
+				sandboxRules.claimController = previousSandboxRule;
+				if (previous === undefined) {
+					delete settings.claimController;
+				} else {
+					settings.claimController = previous;
+				}
+			}
+		}));
+	}
+
+	for (const name of [ 'W3N3', 'W12N1' ]) {
+		test(`real sandbox refreshes the global claim switch in ${name}`, () => simulate({
+			[name]: room => {
+				if (!room.controller) {
+					room['#insertObject'](createRoomObject(new StructureController(), new RoomPosition(33, 32, name)));
+					room['#flushObjects'](null);
+				}
+				room['#user'] = room.controller!['#user'] = null;
+				room['#level'] = 0;
+				room['#insertObject'](createCreep(new RoomPosition(34, 32, name), [ C.CLAIM, C.MOVE ], 'claimer', '104'));
+			},
+		})(async ({ sandbox, tick, peekRoom }) => {
+			const settings = config.speedrun!;
+			const previous = settings.claimController;
+			settings.claimController = false;
+			try {
+				await using instance = await sandbox('104', ({ Game, Memory }) => {
+					const creep = Game.creeps.claimer!;
+					Game.gcl = { level: 1, progress: 0, progressTotal: 1000000, '#roomCount': 0 };
+					const result = creep.claimController(creep.room.controller!);
+					assert.strictEqual(result, Memory.allowed ? 0 : -7);
+					Memory.allowed = true;
+				});
+				await tick();
+				assert.strictEqual(await peekRoom(name, room => room['#user']), null);
+				settings.claimController = true;
+				await tick();
+				assert.strictEqual(await peekRoom(name, room => room['#user']), '104');
+			} finally {
+				if (previous === undefined) {
+					delete settings.claimController;
+				} else {
+					settings.claimController = previous;
+				}
+			}
+		}));
+	}
 
 	test('global respawn removes outside player objects without season-1 neutral cleanup', () => outside(async ({ shard, tick, peekRoom }) => {
 		await respawnPlayer(shard, '100');

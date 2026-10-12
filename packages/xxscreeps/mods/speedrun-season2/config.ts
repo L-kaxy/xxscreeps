@@ -1,7 +1,7 @@
 /**
  * Independent season-2 settings for E1N1 through E9N9.
  * Initial spawn is fixed; periodic Invaders are configurable. Other gameplay hooks arrive later.
- * Deposits and power banks remain global switches under `speedrun`.
+ * Deposits, power banks, claiming and ruins remain global switches under `speedrun`.
  */
 export interface SpeedrunSeason2Settings {
 	/**
@@ -10,12 +10,6 @@ export interface SpeedrunSeason2Settings {
 	 * @default false
 	 */
 	invaders?: boolean;
-
-	/**
-	 * Whether destroyed structures in the season-2 block leave ruins.
-	 * @default false
-	 */
-	ruins?: boolean;
 
 	/**
 	 * Whether season-2 respawn clears all artificial buildings and construction sites in its block.
@@ -36,17 +30,11 @@ export interface SpeedrunSeason2Settings {
 	 * @default 40000
 	 */
 	respawnAfter?: number;
-
-	/**
-	 * Whether creeps in the season-2 block may claim other controllers.
-	 * @default false
-	 */
-	claimController?: boolean;
 }
 
 export interface SpeedrunSeason2Config {
 	/**
-	 * Independent season-2 configuration; never falls back to season-1 settings.
+	 * Independent season-2 settings; global switches exist only under `speedrun`.
 	 * Initial spawn and periodic Invaders are connected; other rules arrive in subsequent steps.
 	 */
 	speedrunSeason2?: SpeedrunSeason2Settings;
@@ -59,10 +47,8 @@ declare module 'xxscreeps/config/config.js' {
 export const initializationDefaults = {
 	speedrunSeason2: {
 		invaders: false,
-		ruins: false,
 		respawnCleanup: true,
 		raceBrackets: [ 20000, 40000 ],
 		respawnAfter: 40000,
-		claimController: false,
 	},
 } satisfies SpeedrunSeason2Config;

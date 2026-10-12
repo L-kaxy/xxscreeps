@@ -1,5 +1,7 @@
 # 赛季 2 第 1 步 骨架与配置验收
 
+> 此文记录第 1 步当时的配置和测试结果。2026-10-13 第 6、7 步已移除 `speedrunSeason2.claimController`、`speedrunSeason2.ruins`；不要再复制下方历史示例中的这两个键，现行配置和升级操作见 [STEP6-7.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP6-7.md)。
+
 本步仅建立可加载的 mod、独立配置和房间范围函数。**尚未实现地图初始化、E3N3 落地限制、Invader、claim、Ruin、比赛、清场或排行榜。** 配置可以读取和校验，但不会执行赛季 2 玩法。
 
 当前验收状态：第 1 步实现、专项自动测试和用户验收已通过；用户已授权开始第 2 步。
