@@ -18,6 +18,7 @@ const commands = {
 	manage: './dist/scripts/manage.js',
 	processor: './dist/engine/service/processor.js',
 	runner: './dist/engine/service/runner.js',
+	'season2-map': './dist/scripts/season2-map.js',
 	start: './dist/engine/service/launcher.js',
 	test: './dist/test/run.js',
 	types: './dist/scripts/types.js',

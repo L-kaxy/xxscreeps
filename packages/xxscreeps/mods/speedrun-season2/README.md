@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-确认日期：2026-10-12。第 1 步的 mod 骨架、独立配置、房间范围判断已由用户验收通过；第 2 步已将旧比赛逻辑提取为显式配置、范围及存储前缀的公共工厂，完成自动测试，等待用户验收。新 mod 仍仅注册 `config` 和 `test` provider，赛季 2 运行逻辑尚未接入。地图初始化、落地限制、计分、清场和页面等仍为后续约定，不代表已经可用。部署验收见 [STEP1.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP1.md) 和 [STEP2.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP2.md)。
+确认日期：2026-10-12。第 0～2 步已由用户验收通过；第 3 步已固定原版地图资源，提供 `season2-map` 显式预览、停服初始化及回滚命令，完成自动测试，等待用户验收。新 mod 仍仅注册 `config` 和 `test` provider，不在启动时拍图；赛季 2 落地限制、独立玩法、比赛、清场和页面尚未接入。**本步只在测试副本初始化，不在线上开放未完成的赛季 2。** 部署验收见 [STEP1.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP1.md)、[STEP2.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP2.md) 和 [STEP3.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP3.md)。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 0、1 步已由用户确认通过，第 3 步尚未开始。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前停在第 3 步，第 4 步尚未开始。
 
 ## 赛季范围和规则
 
@@ -36,6 +36,8 @@
 ```
 
 该文件包含 `W0N0～W10N10` 的 121 个房间，地形位于 `rooms.terrain`，初始房间对象位于 `rooms.objects`。`screeps-server-mockup/assets/rooms.json` 只有九个经过修改的示例房间，不作为本次地图来源。
+
+第 3 步已将所需 81 房提取到 [original-map.json](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/assets/original-map.json)。运行和部署不依赖上述开发机目录；提取范围、资源字段及许可说明见 [资源说明](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/assets/README.md)。
 
 取原图的 `W1N1～W9N9`，沿真实世界坐标向东平移 11 个房间，生成赛季 2 的 81 房：
 
