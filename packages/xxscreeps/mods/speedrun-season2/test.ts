@@ -17,6 +17,7 @@ import schema from './config.schema.json' with { type: 'json' };
 import { isSeason2Room, isSeason2SpawnRoom, season2SpawnRoom } from './rooms.js';
 import { manifest } from './index.js';
 import './map-test.js';
+import './spawn-test.js';
 
 const season1Mod = 'xxscreeps/mods/speedrun';
 const season2Mod = 'xxscreeps/mods/speedrun-season2';
@@ -64,9 +65,9 @@ async function inspectConfig(raw: object): Promise<ConfigInspection> {
 }
 
 describe('mods/speedrun-season2', () => {
-	test('the skeleton only registers config and test providers', () => {
+	test('step 4 registers only config, test and initial-spawn providers', () => {
 		assert.deepStrictEqual(manifest.dependencies, [ season1Mod ]);
-		assert.deepStrictEqual(manifest.provides, [ 'config', 'test' ]);
+		assert.deepStrictEqual(manifest.provides, [ 'backend', 'config', 'processor', 'test' ]);
 	});
 
 	test('the real loader loads each season once, with season 1 first', () => {
@@ -74,7 +75,7 @@ describe('mods/speedrun-season2', () => {
 		assert.strictEqual(loaded.length, 2);
 		assert.match(loaded[0]!.url, /\/speedrun\/index\.js$/);
 		assert.match(loaded[1]!.url, /\/speedrun-season2\/index\.js$/);
-		assert.deepStrictEqual(Object.keys(loaded[1]!.provides), [ 'config', 'test' ]);
+		assert.deepStrictEqual(Object.keys(loaded[1]!.provides), [ 'backend', 'config', 'processor', 'test' ]);
 		assert.ok(config.speedrun);
 		assert.ok(config.speedrunSeason2);
 	});
@@ -141,7 +142,7 @@ describe('mods/speedrun-season2', () => {
 		}
 	});
 
-	test('the future spawn eligibility helper selects E3N3 only', () => {
+	test('the spawn eligibility helper selects E3N3 only', () => {
 		assert.strictEqual(season2SpawnRoom, 'E3N3');
 		for (let xx = 1; xx <= 9; ++xx) {
 			for (let yy = 1; yy <= 9; ++yy) {
@@ -163,7 +164,7 @@ describe('mods/speedrun-season2', () => {
 		assert.deepStrictEqual(result.speedrunSeason2, expectedDefaults);
 		assert.deepStrictEqual(result.speedrun, season1Defaults.speedrun);
 		assert.deepStrictEqual(result.seasonMods.map(mod => mod.name), [ 'speedrun', 'speedrun-season2' ]);
-		assert.deepStrictEqual(result.seasonMods[1]!.providers, [ 'config', 'test' ]);
+		assert.deepStrictEqual(result.seasonMods[1]!.providers, [ 'backend', 'config', 'processor', 'test' ]);
 	});
 
 	test('explicit dual-season overrides stay in their own roots', async () => {
