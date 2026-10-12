@@ -31,14 +31,14 @@ roomTickProcessors.unshift((room, context) => {
 // the object; that stage is therefore the one point every deposit and every power bank has to pass,
 // and the point this rule takes over.
 //
-// Chain rather than shadow each vanilla handler: only an old-sector placement can be dropped.
-// Highways and other seasons retain vanilla behavior. Existing resources keep their processors.
+// These two switches intentionally remain global, including highways and other seasons. Chain
+// each vanilla handler so enabling its switch restores placement. Existing resources keep ticking.
 for (const [ intent, setting ] of [ [ 'placeDeposit', 'deposits' ], [ 'placePowerBank', 'powerBanks' ] ] as const) {
 	const placement = intentProcessors.find(info => info.intent === intent && info.receiver === Room);
 	if (placement) {
 		const vanilla = placement.process;
 		placement.process = (room: Room, context: ProcessorContext, ...data: unknown[]) => {
-			if (!isSpeedrunRoom(room.name) || config.speedrun?.[setting] === true) {
+			if (config.speedrun?.[setting] === true) {
 				vanilla(room, context, ...data);
 			}
 		};

@@ -2,7 +2,7 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "properties": {
         "speedrun": {
-            "description": "Season-1 ruleset settings for W1N1 through W9N9 only. Other sectors and highways are untouched. Player respawn remains account-wide.",
+            "description": "Season-1 ruleset settings for W1N1 through W9N9. Deposit and power bank switches remain global. Player respawn remains account-wide.",
             "properties": {
                 "invaders": {
                     "description": "Whether the periodic raid generator runs in W1N1 through W9N9. With this off the room's harvest budget is cleared before the generator runs, including previously banked budgets. Other rooms are unaffected.",
@@ -10,12 +10,12 @@
                     "default": false
                 },
                 "deposits": {
-                    "description": "Whether the periodic deposit generator (mods/modern/deposit) runs. Off by default: the placement intent is dropped, so no new deposit is ever put down. Deposits already in the world keep being harvested and decay on schedule, and their decay no longer triggers a refill. Set to true for vanilla placement.",
+                    "description": "Whether the periodic deposit generator (mods/modern/deposit) runs globally, including highways and other sectors. Off by default: the placement intent is dropped, so no new deposit is ever put down. Deposits already in the world keep being harvested and decay on schedule, and their decay no longer triggers a refill. Set to true for vanilla placement.",
                     "type": "boolean",
                     "default": false
                 },
                 "powerBanks": {
-                    "description": "Whether the periodic power bank generator (mods/modern/powerbank) runs. Off by default: the placement intent is dropped, so no new bank is ever put down. Banks already in the world decay on schedule. Set to true for vanilla placement.",
+                    "description": "Whether the periodic power bank generator (mods/modern/powerbank) runs globally, including highways and other sectors. Off by default: the placement intent is dropped, so no new bank is ever put down. Banks already in the world decay on schedule. Set to true for vanilla placement.",
                     "type": "boolean",
                     "default": false
                 },

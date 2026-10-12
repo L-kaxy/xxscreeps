@@ -1,4 +1,4 @@
-/** Season-1 settings for W1N1 through W9N9; player respawn itself remains account-wide. */
+/** Season-1 settings; deposits and power banks remain global, as does player respawn. */
 export interface SpeedrunSettings {
 	/**
 	 * Whether the periodic raid generator runs. With this off a room's harvest budget is cleared on
@@ -8,7 +8,7 @@ export interface SpeedrunSettings {
 	invaders?: boolean;
 
 	/**
-	 * Whether the periodic deposit generator (`mods/modern/deposit`) runs. With this off the
+	 * Whether the periodic deposit generator (`mods/modern/deposit`) runs globally. With this off the
 	 * generator's placement intent is dropped, so no new deposit is ever put down: the evaluator
 	 * keeps walking the sector schedule and the intent keeps arriving, but nothing lands. Deposits
 	 * already in the world are untouched -- they keep their cooldown, keep being harvested and decay
@@ -19,7 +19,7 @@ export interface SpeedrunSettings {
 	deposits?: boolean;
 
 	/**
-	 * Whether the periodic power bank generator (`mods/modern/powerbank`) runs. With this off the
+	 * Whether the periodic power bank generator (`mods/modern/powerbank`) runs globally. With this off the
 	 * generator's placement intent is dropped, so no new bank is ever put down; banks already in the
 	 * world are untouched and decay on schedule. Set it to `true` to get vanilla placement back.
 	 * @default false
@@ -135,7 +135,8 @@ export interface SpeedrunSettings {
 
 export interface SpeedrunConfig {
 	/**
-	 * Season-1 ruleset settings for W1N1 through W9N9 only. Other sectors and highways are untouched.
+	 * Season-1 ruleset settings for W1N1 through W9N9. Deposit and power bank switches remain global;
+	 * player respawn remains account-wide.
 	 */
 	speedrun?: SpeedrunSettings;
 }

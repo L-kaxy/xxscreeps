@@ -14,8 +14,8 @@ import * as types from 'xxscreeps/tsroot.js';
 // `classic` is declared as a dependency so that it always loads first: speedrun's rules are
 // expressed as adjustments on top of the vanilla ruleset, not as a replacement for it.
 //
-// Season 1 owns W1N1 through W9N9 only. All gameplay and map adjustments below are scoped to
-// that block; highways and other sectors keep vanilla behavior. A successful landing elsewhere
+// Season 1 owns W1N1 through W9N9 only. Gameplay and map adjustments are scoped to that block,
+// except the deposit and power bank switches, which remain global. A successful landing elsewhere
 // ends the old race clock without creating an old-season run. Player respawn remains global.
 //
 // Rules implemented so far, all configured under the `speedrun` key (see `config.ts`):
@@ -26,9 +26,9 @@ import * as types from 'xxscreeps/tsroot.js';
 //
 //    - `deposits` / `powerBanks` (default `false`): the two resource generators -- `modern/deposit`
 //      and `modern/powerbank` -- are stopped at their placement intent, so no new deposit or power
-//      bank is ever put down. Objects already in the world keep their tick processor, their decay
-//      and their schedule; nothing is written to or deleted from the world. See the second half of
-//      `processor.ts`.
+//      bank is ever put down anywhere in the shard. Objects already in the world keep their tick
+//      processor, their decay and their schedule; nothing is written to or deleted from the world.
+//      See `processor.ts`.
 //
 //    - `ruins` (default `false`): a destroyed structure leaves no ruin behind. Every lane which
 //      puts one down -- combat and decay destruction, and the two spawn intents whose ruins carry a

@@ -269,14 +269,14 @@ describe('mods/speedrun', () => {
 			);
 		});
 
-		test('the placement intents chain one handler instead of globally shadowing vanilla', () => {
+		test('the global switches wrap one vanilla placement handler each', () => {
 			for (const intent of [ 'placeDeposit', 'placePowerBank' ]) {
 				const infos = intentProcessors.filter(info => info.intent === intent && info.receiver === Room);
-				assert.strictEqual(infos.length, 1, `${intent} has one room-scoped handler`);
+				assert.strictEqual(infos.length, 1, `${intent} has one handler`);
 			}
 		});
 
-		test('a due sector still places deposits on its out-of-sector highways', () => simulate({})(async ({ shard, tick }) => {
+		test('a due sector cannot place deposits even on highways when globally disabled', () => simulate({})(async ({ shard, tick }) => {
 			using bootstrap = withDepositBootstrap();
 			await runShardInitializers(shard);
 			assert.ok((await dueSectorsAt(shard, Date.now())).includes('W5N5'), 'the sector came due');
@@ -287,19 +287,19 @@ describe('mods/speedrun', () => {
 			const { sectorControl } = testWorld.map['#getRoomTraits']('W5N5');
 			assert.ok(sectorControl, 'the test world has a single sector, W5N5');
 			const deposits = await loadSectorDeposits(shard, testWorld, 'W5N5', sectorControl.edges);
-			assert.ok(deposits.length > 0, 'highways are outside the old ruleset');
+			assert.strictEqual(deposits.length, 0, 'the switch also suppresses highway placement');
 		}));
 
-		test('a due highway room retains vanilla power-bank placement', () => simulate({})(async ({ shard, tick }) => {
+		test('a due highway room cannot place a power bank when globally disabled', () => simulate({})(async ({ shard, tick }) => {
 			using rng = deterministicRandomForTesting();
 			const scheduledAt = shard.time;
 			await scheduleRoom(shard, 'W0N0', 0);
 			await tick(2);
 			const room = await shard.loadRoom('W0N0');
-			assert.notStrictEqual(
+			assert.strictEqual(
 				Fn.find(room['#objects'], instanceOfPredicate(StructurePowerBank)),
 				undefined,
-				'a power bank was placed outside the old sector',
+				'the switch also suppresses highway placement',
 			);
 			// The generator ran: it rolled the next respawn and pushed the scratch schedule forward.
 			const due = (await inspectDuePowerBankRoomsForTest(shard)).find(([ , roomName ]) => roomName === 'W0N0');
@@ -307,7 +307,7 @@ describe('mods/speedrun', () => {
 			assert.ok(due[0] - scheduledAt >= C.POWER_BANK_RESPAWN_TIME * 0.75, 'its timer moved into the future');
 			// The next-due tick is persisted by the intent handler, which the ruleset takes over -- so the
 			// room itself is left exactly as it was: nothing is written to the world.
-			assert.ok(room['#nextPowerBankTime'] > 0, 'vanilla persisted the room schedule');
+			assert.strictEqual(room['#nextPowerBankTime'], 0, 'the blocked intent did not persist the room schedule');
 		}));
 	});
 
