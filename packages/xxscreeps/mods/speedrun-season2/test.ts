@@ -19,16 +19,15 @@ import { manifest } from './index.js';
 import './map-test.js';
 import './spawn-test.js';
 import './invader-test.js';
+import './global-rules-test.js';
 
 const season1Mod = 'xxscreeps/mods/speedrun';
 const season2Mod = 'xxscreeps/mods/speedrun-season2';
 const expectedDefaults: SpeedrunSeason2Settings = {
 	invaders: false,
-	ruins: false,
 	respawnCleanup: true,
 	raceBrackets: [ 20000, 40000 ],
 	respawnAfter: 40000,
-	claimController: false,
 };
 const validate = new Ajv().compile(schema);
 const run = promisify(execFile);
@@ -66,7 +65,7 @@ async function inspectConfig(raw: object): Promise<ConfigInspection> {
 }
 
 describe('mods/speedrun-season2', () => {
-	test('step 5 retains the existing providers without adding a map or race provider', () => {
+	test('global claim and ruin rules reuse season 1 without new providers', () => {
 		assert.deepStrictEqual(manifest.dependencies, [ season1Mod ]);
 		assert.deepStrictEqual(manifest.provides, [ 'backend', 'config', 'processor', 'test' ]);
 	});
@@ -105,9 +104,7 @@ describe('mods/speedrun-season2', () => {
 
 	for (const [ key, value ] of [
 		[ 'invaders', 'false' ],
-		[ 'ruins', 0 ],
 		[ 'respawnCleanup', null ],
-		[ 'claimController', 'true' ],
 		[ 'raceBrackets', [ 20.5, 40 ] ],
 		[ 'respawnAfter', 40.5 ],
 	] as const) {
@@ -116,8 +113,8 @@ describe('mods/speedrun-season2', () => {
 		});
 	}
 
-	test('global resource switches and core-map settings do not belong to season 2', () => {
-		for (const key of [ 'deposits', 'powerBanks', 'closeCenterNine', 'wallSectorCores' ]) {
+	test('global switches and core-map settings do not belong to season 2', () => {
+		for (const key of [ 'deposits', 'powerBanks', 'claimController', 'ruins', 'closeCenterNine', 'wallSectorCores' ]) {
 			assert.strictEqual(validate({ speedrunSeason2: { [key]: false } }), false, key);
 		}
 	});
@@ -170,7 +167,7 @@ describe('mods/speedrun-season2', () => {
 
 	test('explicit dual-season overrides stay in their own roots', async () => {
 		const speedrun = { invaders: true, ruins: true, raceBrackets: [ 200, 400 ], respawnAfter: 400 };
-		const speedrunSeason2 = { invaders: false, ruins: false, raceBrackets: [ 20, 40 ], respawnAfter: 40 };
+		const speedrunSeason2 = { invaders: false, raceBrackets: [ 20, 40 ], respawnAfter: 40 };
 		const result = await inspectConfig({ mods: [ season1Mod, season2Mod ], speedrun, speedrunSeason2 });
 		assert.deepStrictEqual(result.speedrun, { ...season1Defaults.speedrun, ...speedrun });
 		assert.deepStrictEqual(result.speedrunSeason2, { ...expectedDefaults, ...speedrunSeason2 });
@@ -190,4 +187,13 @@ describe('mods/speedrun-season2', () => {
 			/speedrunSeason2\/invaders must be boolean/,
 		);
 	});
+
+	for (const key of [ 'claimController', 'ruins' ]) {
+		test(`the real loader rejects the removed season-2 ${key} switch`, async () => {
+			await assert.rejects(
+				inspectConfig({ mods: [ season2Mod ], speedrunSeason2: { [key]: false } }),
+				/speedrunSeason2 must NOT have additional properties/,
+			);
+		});
+	}
 });

@@ -1,8 +1,8 @@
+import type { TickPayload } from 'xxscreeps/engine/runner/index.js';
 import type { StructureController } from 'xxscreeps/mods/classic/controller/controller.js';
 import { hooks } from 'xxscreeps/game/index.js';
 import { Creep } from 'xxscreeps/mods/classic/creep/creep.js';
 import * as C from 'xxscreeps:mods/constants';
-import { isSpeedrunRoom } from './scope.js';
 
 // `Creep.claimController` is installed by `mods/classic/controller` with
 // `extend(Creep, { claimController })`, which defines a plain writable property on
@@ -17,7 +17,7 @@ import { isSpeedrunRoom } from './scope.js';
 // claimable by you" (`mods/classic/controller/creep.ts:176-184`), so a bot branching on error codes
 // takes a path it already handles.
 //
-// Only creeps in W1N1 through W9N9 use this switch; other rooms keep vanilla claiming.
+// This switch is global: both seasons, highways and other sectors use `speedrun.claimController`.
 // Only this API is wrapped: `reserveController`, `attackController` and `upgradeController` are
 // untouched, and the starting room the backend hands a new player goes through its own `placeSpawn`
 // intent, which never calls this method.
@@ -29,16 +29,19 @@ export const sandboxRules = {
 	claimController: false,
 };
 
-hooks.register('runtimeConnector', {
-	receive(payload) {
+export const claimRuntimeConnector = {
+	receive(payload: TickPayload) {
+		// Fail closed even if a malformed runtime payload violates the TypeScript type.
+		// eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
 		sandboxRules.claimController = payload.speedrunClaimControllerAllowed === true;
 	},
-});
+};
+hooks.register('runtimeConnector', claimRuntimeConnector);
 
 const vanillaClaimController = Creep.prototype.claimController;
 
 Creep.prototype.claimController = function(target: StructureController) {
-	if (isSpeedrunRoom(this.pos.roomName) && !sandboxRules.claimController) {
+	if (!sandboxRules.claimController) {
 		return C.ERR_INVALID_TARGET;
 	}
 	return vanillaClaimController.call(this, target);

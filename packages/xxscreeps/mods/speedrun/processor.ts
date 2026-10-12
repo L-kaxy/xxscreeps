@@ -59,13 +59,14 @@ for (const [ intent, setting ] of [ [ 'placeDeposit', 'deposits' ], [ 'placePowe
 // has no half-written object to pick up. The `EVENT_OBJECT_DESTROYED` entry of the structure which
 // died is still appended, and the store it carried goes with the ruin.
 //
+// `speedrun.ruins` is global, including both seasons, highways and other sectors.
 // The switch is read per insertion so a test can flip it inside a running process; the value in
 // `.screepsrc.yaml` is read while a service boots, so an operator flipping that one still needs a
 // restart. Tombstones -- the other kind of leftover, left by a dying creep -- are a different door
 // (`mods/classic/creep/processor.ts`) and are not touched.
 Room.prototype['#insertObject'] = function(insertObject) {
 	return function(this: Room, object: RoomObject, now?: boolean) {
-		if (!isSpeedrunRoom(this.name) || config.speedrun?.ruins === true || !(object instanceof Ruin)) {
+		if (config.speedrun?.ruins === true || !(object instanceof Ruin)) {
 			insertObject.call(this, object, now);
 		}
 	};

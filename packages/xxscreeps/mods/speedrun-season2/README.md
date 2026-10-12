@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～4 步（含外围出口封墙）已由用户验收通过。第 5 步在原有 `processor` provider 中接入按新区块控制的周期 Invader 开关，验收见 [STEP5.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP5.md)。新 mod 仍注册 `backend`、`config`、`processor`、`test` provider，地图和补墙仍是显式 CLI，不在启动时拍图。独立 claim/Ruin、比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～5 步（含外围出口封墙）已由用户验收通过。第 6、7 步已按最新要求合并实现并完成专项及基线回归，claim 和 Ruin 全图共用旧配置，不再独立配置，等待用户验收。新 mod 仍注册 `backend`、`config`、`processor`、`test` provider，地图和补墙仍是显式 CLI，不在启动时拍图。比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前停在第 5 步，第 6 步尚未开始。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前合并交付第 6、7 步，第 8 步尚未开始。
 
 ## 赛季范围和规则
 
@@ -18,6 +18,8 @@
 | 中央九房 | 旧区块内继续关闭、封墙 | 不关闭、不封墙，正常运行 |
 | 统一地形命令及恢复 | 只作用于旧区块 | 不参与旧赛季的统一地形操作 |
 | Invader | 按旧区块和旧配置控制 | 按新区块和独立配置控制 |
+| claimController | `speedrun.claimController` 全图控制 | 共用同一个全图开关 |
+| Ruin | `speedrun.ruins` 全图控制 | 共用同一个全图开关 |
 | 玩家 respawn | 清掉该玩家全部房间的对象并释放控制器 | 同样清掉该玩家全部房间 |
 | respawn 地图清场 | 保持现有清理规则 | 清掉新区块内所有人造建筑 |
 | 比赛状态与成绩 | 保留 `speedrun/*` | 使用 `speedrun-season2/*` |
@@ -25,7 +27,7 @@
 
 区块判断应由统一的房间范围函数负责，使用准确的房间名和数值范围，不用模糊前缀或字符串大小比较。两个赛季的 `placeSpawn`、比赛启动、计分和实时榜都检查各自区块，不再由旧 mod 全局接管。
 
-赛季 2 仅允许一个玩家正常落地，继续使用现有房间占用和玩家 presence 检查，不增加单人锁、排队、房间实例或多人并行机制。两个赛季均保持不能通过 `claimController` 占领其他房间的玩法。
+赛季 2 仅允许一个玩家正常落地，继续使用现有房间占用和玩家 presence 检查，不增加单人锁、排队、房间实例或多人并行机制。默认 `speedrun.claimController: false` 禁止全世界通过此 API 占领房间；设为 true 则全图恢复原版检查，不保证任意目标都可占领。
 
 ## 原版地图来源和平移方式
 
@@ -83,7 +85,7 @@ W1N1 → E9N1
 
 赛季 2 提供自己的 `config.ts` 和配置 schema，以 `speedrunSeason2` 为根节点。现有 `speedrun` 根节点和旧配置名称保持兼容。
 
-配置示意如下，两个赛季根节点独立；deposit 和 power bank 是例外，继续由旧配置中的全图开关统一控制，赛季 2 不再另设对应开关：
+配置示意如下，两个赛季根节点独立；claim、Ruin、deposit 和 power bank 是例外，继续由旧配置中的全图开关统一控制，赛季 2 不再另设对应开关：
 
 ```yaml
 mods:
@@ -105,18 +107,16 @@ speedrun:
 
 speedrunSeason2:
   invaders: false
-  ruins: false
   respawnCleanup: true
   raceBrackets: [20000, 40000]
   respawnAfter: 40000
-  claimController: false
 ```
 
-赛季 2 的基础默认值先沿用旧赛季的玩法，但由自己的 defaults 定义，不能在运行时回退读取 `config.speedrun`。例如，只修改 `speedrun.invaders`，不能影响新区块；只修改 `speedrunSeason2.invaders`，不能影响旧区块。
+赛季 2 的独立设置由自己的 defaults 定义，不能在运行时回退读取 `config.speedrun`。例如，只修改 `speedrun.invaders`，不能影响新区块；只修改 `speedrunSeason2.invaders`，不能影响旧区块。claim、Ruin 和两个资源开关不是独立设置，只在 `speedrun` 下定义。
 
 两个配置中的 `respawnCleanup` 使用各自赛季的清场实现：旧赛季保持原有语义，新赛季清理整个新区块的人造建筑。赛季 2 不继承旧赛季中央九房和统一地形规则。
 
-配置进入 runner sandbox 时也要保留赛季区分，不能让两个 mod 反复覆盖同一个全局开关，导致后加载者决定整个世界的行为。
+claim 继续只由旧 mod 的 driver/game 传入和读取唯一全图开关，不新增赛季 2 payload 或游戏 API 包装。已使用旧版示例的部署必须删除 `speedrunSeason2.claimController` 和 `speedrunSeason2.ruins`，否则 schema 会拒绝启动。
 
 ## Invader 按区块独立控制
 
@@ -132,7 +132,11 @@ speedrunSeason2:
 
 该开关延续旧配置控制周期生成的含义，不删除已有 Invader，也不关闭 Source Keeper；赛季 2 中央九房的原生机制继续运行。第 5 步明确：主动请求 Invader 的 `/api/game/create-invader` 及 `requestInvader` 内部 intent 保持原规则，不跟随两个周期生成开关；没有添加 API 包装或删除 NPC 的逻辑。
 
-其他复用的基础玩法钩子也要避免全局覆盖，例如旧 mod 对 Ruin 插入的包装，应按房间选择对应赛季配置。**deposit 和 power bank 生成开关明确保留全图生效**：由 `speedrun.deposits` 和 `speedrun.powerBanks` 统一控制，包括 highway、新旧赛季及其他区块；关闭只阻止新增，不删除已有资源。赛季 2 不叠加资源生成包装或独立开关。
+## claim、Ruin 和资源全图控制
+
+按 2026-10-13 最新要求，`speedrun.claimController` 和 `speedrun.ruins` 全图生效，包括新旧赛季、highway 和其他区块。默认均为 false：claim 在记录 intent 前返回 `ERR_INVALID_TARGET`，Ruin 在插入房间前被丢弃；true 分别恢复对应原版行为。reserve、attack、upgradeController 和初始 placeSpawn 不因 claim 开关改变；已有 Ruin 不被删除，creep tombstone 不受 Ruin 开关影响。
+
+**deposit 和 power bank 生成开关继续全图生效**：由 `speedrun.deposits` 和 `speedrun.powerBanks` 统一控制；关闭只阻止新增，不删除已有资源。上述四项不新增赛季 2 包装或独立开关。部署和验收见 [STEP6-7.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP6-7.md)。
 
 ## 落地和比赛生命周期
 
@@ -220,7 +224,7 @@ speedrun-season2/racing
 | `race.ts` | 使用独立前缀的比赛状态、计分和读榜 |
 | `main.ts` | 赛季 2 的计分与到期重开任务，不封墙、不关闭中央九房 |
 | `backend.ts` 及 `page.ts` | 独立榜单 API、页面和客户端入口 |
-| `driver.ts` 及 `game.ts` | 独立配置传入 sandbox 及游戏 API 限制 |
+| 旧 mod 的 `driver.ts` 及 `game.ts` | 复用唯一的全图 claim payload 和 API 限制，新 mod 不重复注册 |
 | 地图初始化工具及静态资源 | 导入原版地图并按平移映射写入新区块 |
 | `test.ts` | 两个赛季的隔离与回归测试 |
 
@@ -233,7 +237,7 @@ speedrun-season2/racing
 实施顺序：
 
 1. 备份旧赛季现场。
-2. 将旧地图规则、基础玩法钩子、Invader、落地与比赛处理按旧区块收窄。
+2. 将旧地图规则、Invader、落地与比赛处理按旧区块收窄；claim、Ruin 和资源保持全图共用开关。
 3. 建立赛季 2 的独立配置和共享逻辑的显式赛季参数。
 4. 将原版地图平移写入新区块。
 5. 实现赛季 2 落地、计分、整体 respawn 和全区人造建筑清理。
@@ -248,6 +252,7 @@ speedrun-season2/racing
 - 成功落地只启动本赛季 run；计时队列、实时榜和历史榜不混读、混写。
 - Invader 两个配置分别开关的四种组合都正确，区块外不受影响。
 - 其他独立配置不会被旧 mod 的全局包装覆盖。
+- claim、Ruin 的全图 false/true 都正确，两个赛季和区块外一致；删除废弃的赛季 2 配置项后可正常启动。
 - deposit 和 power bank 生成在两个赛季区块及 highway 上均遵循 `speedrun` 下的全图开关；两个开关独立生效，不删除已有资源。
 - 手动和自动 respawn 均完成玩家整体退出；赛季 2 同时清掉全区人造建筑和施工点，保留原生对象及地形。
 - 无 presence 的房间同样被清场，旧清理任务不误删下一局建筑。

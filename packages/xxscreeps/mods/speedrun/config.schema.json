@@ -2,7 +2,7 @@
     "$schema": "http://json-schema.org/draft-07/schema#",
     "properties": {
         "speedrun": {
-            "description": "Season-1 ruleset settings for W1N1 through W9N9. Deposit and power bank switches remain global. Player respawn remains account-wide.",
+            "description": "Season-1 ruleset settings for W1N1 through W9N9. Deposit, power bank, claimController and ruin switches remain global. Player respawn remains account-wide.",
             "properties": {
                 "invaders": {
                     "description": "Whether the periodic raid generator runs in W1N1 through W9N9. With this off the room's harvest budget is cleared before the generator runs, including previously banked budgets. Other rooms are unaffected.",
@@ -20,7 +20,7 @@
                     "default": false
                 },
                 "ruins": {
-                    "description": "Whether a destroyed structure leaves a ruin behind. Off by default: a ruin never reaches the room -- the object handed to Room['#insertObject'] is dropped, so nothing is left to loot and nothing is left to decay. Covers combat and decay destruction and the two spawn intents (handover / abandoned base), whose ruins otherwise sit in the room for 100000 and 500000 ticks. No room blob format changes; the EVENT_OBJECT_DESTROYED log entry is still appended and tombstones are untouched. Set to true for vanilla ruins.",
+                    "description": "Whether a destroyed structure anywhere in the world leaves a ruin behind. Off by default: a ruin never reaches the room -- the object handed to Room['#insertObject'] is dropped, so nothing is left to loot and nothing is left to decay. Covers combat and decay destruction and the two spawn intents (handover / abandoned base), whose ruins otherwise sit in the room for 100000 and 500000 ticks. Existing ruins are not removed. No room blob format changes; the EVENT_OBJECT_DESTROYED log entry is still appended and tombstones are untouched. Set to true for vanilla ruins.",
                     "type": "boolean",
                     "default": false
                 },
@@ -41,7 +41,7 @@
                     "default": 40000
                 },
                 "claimController": {
-                    "description": "Whether creeps may claim neutral controllers. Off by default: Creep.claimController returns ERR_INVALID_TARGET before recording an intent, so no room can change hands. reserveController/attackController/upgradeController still work, and a new player's starting room is claimed through its own placeSpawn intent. Set to true to let players claim again.",
+                    "description": "Whether creeps anywhere in the world may claim neutral controllers. Off by default: Creep.claimController returns ERR_INVALID_TARGET before recording an intent, so no room can change hands through this API. reserveController/attackController/upgradeController still work, and a new player's starting room is claimed through its own placeSpawn intent. Set to true to restore vanilla claiming globally.",
                     "type": "boolean",
                     "default": false
                 },
