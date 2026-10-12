@@ -5,7 +5,7 @@ import { intentProcessors, roomTickProcessors } from 'xxscreeps/engine/processor
 import { Game, me } from 'xxscreeps/game/index.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { Ruin } from 'xxscreeps/mods/classic/structure/ruin.js';
-import { raceBrackets, startRun, stopRun } from './race.js';
+import { startRun, stopRun } from './race.js';
 import { isSpeedrunRoom } from './scope.js';
 // The respawn rule chains the engine's `unspawn` handler instead of adding a registration of its
 // own, so it lives in a module of its own. See `respawn.ts`.
@@ -89,11 +89,12 @@ if (placeSpawn) {
 		if (!wasUnowned || room['#user'] !== me) {
 			return;
 		}
-		if (!isSpeedrunRoom(room.name)) {
+		if (isSpeedrunRoom(room.name)) {
+			// Even with brackets disabled, a successful landing ends the other season's clock.
+			context.task(startRun(context.shard, me, room.name, Game.time));
+		} else {
 			// A landing elsewhere supersedes the old clock, but never starts an old-season race.
 			context.task(stopRun(context.shard, me, Game.time));
-		} else if (raceBrackets().length !== 0) {
-			context.task(startRun(context.shard, me, room.name, Game.time));
 		}
 	};
 }

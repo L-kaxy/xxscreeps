@@ -16,6 +16,9 @@ export interface RaceDefinition<Namespace extends string = string> {
 	readonly namespace: Namespace;
 	readonly containsRoom: (name: string | undefined) => boolean;
 	readonly getSettings: () => Readonly<RaceSettings> | undefined;
+	/** Real seasons share a persistent activity guard; standalone core consumers remain independent. */
+	readonly isCurrentRun?: (shard: Shard, userId: string, info: Record<string, string>) => Promise<boolean>;
+	readonly withPlayerLock?: <Result>(shard: Shard, userId: string, task: () => Promise<Result>) => Promise<Result>;
 }
 
 /** Six account-level tables and two shard-level queues, all in the supplied namespace. */
@@ -143,7 +146,9 @@ function parseRecord(fields: Record<string, string>): RaceRecord {
  * adapters retain the original live-config behavior, rather than capturing a startup snapshot.
  * Only the caller's namespace and room predicate participate in scheduling, scoring and reads.
  */
-export function createRace<Namespace extends string>({ namespace, containsRoom, getSettings }: RaceDefinition<Namespace>) {
+export function createRace<Namespace extends string>({
+	namespace, containsRoom, getSettings, isCurrentRun, withPlayerLock,
+}: RaceDefinition<Namespace>) {
 	const keys = makeRaceKeys(namespace);
 	const { dueRunsKey, racingKey, runKey, scoreKey, rankKey, bestKey, playerRunsKey, playerBracketsKey } = keys;
 
@@ -234,7 +239,14 @@ export function createRace<Namespace extends string>({ namespace, containsRoom, 
 		if (parsed === undefined || !raceBrackets().includes(parsed.bracket)) {
 			return undefined;
 		}
-		const { bracket, run, userId } = parsed;
+		return withPlayerLock
+			? withPlayerLock(shard, parsed.userId, () => captureCurrentBracket(shard, parsed, time))
+			: captureCurrentBracket(shard, parsed, time);
+	}
+
+	async function captureCurrentBracket(
+		shard: Shard, { bracket, run, userId }: { bracket: number; run: number; userId: string }, time: number,
+	) {
 		const runId = runIdOf(userId, run);
 		const runInfo = await shard.db.data.hGetAll(runKey(userId));
 		if (Number(runInfo.run ?? 0) !== run || runInfo.room === undefined || !containsRoom(runInfo.room)) {
@@ -243,6 +255,10 @@ export function createRace<Namespace extends string>({ namespace, containsRoom, 
 			return undefined;
 		}
 		if (runInfo.endedTick !== undefined) {
+			return undefined;
+		}
+		if (isCurrentRun && !await isCurrentRun(shard, userId, runInfo)) {
+			await stopRun(shard, userId, time);
 			return undefined;
 		}
 		const room = await shard.loadRoom(runInfo.room).catch(() => undefined);
@@ -353,6 +369,12 @@ export function createRace<Namespace extends string>({ namespace, containsRoom, 
 	const resetGiveUpAfter = 50;
 
 	async function resetRun(shard: Shard, runId: string, time: number) {
+		return withPlayerLock
+			? withPlayerLock(shard, parseRunId(runId).userId, () => resetCurrentRun(shard, runId, time))
+			: resetCurrentRun(shard, runId, time);
+	}
+
+	async function resetCurrentRun(shard: Shard, runId: string, time: number) {
 		const { run, userId } = parseRunId(runId);
 		const [ info, username ] = await Promise.all([
 			shard.db.data.hGetAll(runKey(userId)),
@@ -361,6 +383,10 @@ export function createRace<Namespace extends string>({ namespace, containsRoom, 
 		if (Number(info.run ?? 0) !== run || username === null || !containsRoom(info.room)) {
 			// A later landing took over, or the account is gone: there is nobody to hand over.
 			await shard.data.zRem(racingKey, [ runId ]);
+			return;
+		}
+		if (isCurrentRun && !await isCurrentRun(shard, userId, info)) {
+			await stopRun(shard, userId, time);
 			return;
 		}
 		const controlled = await shard.scratch.sMembers(controlledRoomsKey(userId));
@@ -498,6 +524,10 @@ export function createRace<Namespace extends string>({ namespace, containsRoom, 
 			const roomName = info.room;
 			if (Number(info.run ?? 0) !== run || roomName === undefined || !containsRoom(roomName)) {
 				// A later landing took over: this entry describes a run which is over.
+				stale.push(runId);
+				return undefined;
+			}
+			if (isCurrentRun && !await isCurrentRun(shard, userId, info)) {
 				stale.push(runId);
 				return undefined;
 			}

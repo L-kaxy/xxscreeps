@@ -1,5 +1,5 @@
 import { config } from 'xxscreeps/config/index.js';
-import { createRace } from './race-core.js';
+import { createSeasonRace } from './race-lifecycle.js';
 import { isSpeedrunRoom } from './scope.js';
 
 export type { LeaderboardEntry, PlayerRecord, RaceRecord, RacingEntry } from './race-core.js';
@@ -46,7 +46,7 @@ export { controlPointsOf, runIdOf } from './race-core.js';
 
 // Preserve every public season-1 function and storage key. The shared core knows neither
 // config.speedrun nor W/N geography; this adapter supplies both without registering new hooks.
-const race = createRace({
+const race = createSeasonRace({
 	namespace: 'speedrun',
 	containsRoom: isSpeedrunRoom,
 	getSettings: () => config.speedrun,

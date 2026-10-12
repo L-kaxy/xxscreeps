@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～5 步（含外围出口封墙）已由用户验收通过。第 6、7 步已按最新要求合并实现并完成专项及基线回归，claim 和 Ruin 全图共用旧配置，不再独立配置，等待用户验收。新 mod 仍注册 `backend`、`config`、`processor`、`test` provider，地图和补墙仍是显式 CLI，不在启动时拍图。比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～7 步（含外围出口封墙、全图 claim/Ruin）已由用户验收通过。第 8 步已实现独立开局、计时队列及跨赛季活动身份校验，专项及基线回归已完成，等待用户验收。新 mod 仍注册 `backend`、`config`、`processor`、`test` provider，地图和补墙仍是显式 CLI，不在启动时拍图。**赛季 2 计分、自动重开、全区清场和页面尚未接入；中间步骤只在测试副本验收，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前合并交付第 6、7 步，第 8 步尚未开始。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 8 步操作见 [STEP8.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP8.md)，本轮不提前开始第 9 步。
 
 ## 赛季范围和规则
 
@@ -152,7 +152,9 @@ API 层与实际 `placeSpawn` processor 共用赛季范围和落地限制：
 
 玩家可在重开后选择另一个赛季。切换时终止上一赛季的活动 run，保留已记录的历史成绩。到期任务在整体 respawn 前必须核对当前活动比赛，防止旧赛季过期任务清掉玩家的新赛季比赛。
 
-初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
+第 8 步已实现上述独立开局及双向切换。`speedrun/active/<userId>` 是账号级协调元数据，只标记 namespace、shard、run、room、startedTick 和 active，不存成绩；停止后保留 inactive 标记，旧版赛季 1 的无标记活动 run 仍兼容。启动/停止及旧赛季计分/到期任务通过玩家级数据库互斥避免切换交错，旧成绩键名保持不变；这不增加落地人数限制。
+
+初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。第 8 步只按档位建立 due/racing；新赛季到期队列暂不消费，不计分、不自动重开，后续分步接入。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
 
 ## Respawn 和赛季 2 全区清场
 
