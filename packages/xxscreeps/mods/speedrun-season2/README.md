@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-确认日期：2026-10-12。当前已建立第 1 步的 mod 骨架、独立配置、房间范围判断及测试，仅注册 `config` 和 `test` provider；赛季 2 运行逻辑尚未接入。地图初始化、落地限制、计分、清场和页面等仍为后续约定，不代表已经可用。第 1 步部署验收见 [STEP1.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP1.md)。
+确认日期：2026-10-12。第 1 步的 mod 骨架、独立配置、房间范围判断已由用户验收通过；第 2 步已将旧比赛逻辑提取为显式配置、范围及存储前缀的公共工厂，完成自动测试，等待用户验收。新 mod 仍仅注册 `config` 和 `test` provider，赛季 2 运行逻辑尚未接入。地图初始化、落地限制、计分、清场和页面等仍为后续约定，不代表已经可用。部署验收见 [STEP1.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP1.md) 和 [STEP2.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP2.md)。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 0 步已由用户确认通过。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 0、1 步已由用户确认通过，第 3 步尚未开始。
 
 ## 赛季范围和规则
 
