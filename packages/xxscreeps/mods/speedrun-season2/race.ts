@@ -6,7 +6,15 @@ const race = createSeasonRace({
 	namespace: 'speedrun-season2',
 	containsRoom: isSeason2Room,
 	getSettings: () => config.speedrunSeason2,
+	captureOnce: true,
 });
 
-// Step 8 exposes only landing lifecycle and queues, not scoring, resets or leaderboard reads.
-export const { dueRunsKey, racingKey, runKey, raceBrackets, startRun, stopRun } = race;
+export type { LeaderboardEntry, PlayerRecord, RaceRecord } from 'xxscreeps/mods/speedrun/race-core.js';
+export { controlPointsOf, runIdOf } from 'xxscreeps/mods/speedrun/race-core.js';
+
+// Step 9 adds scoring and storage readers only; no respawn, cleanup, HTTP API or page hook.
+export const {
+	dueRunsKey, racingKey, runKey, scoreKey, rankKey, bestKey, playerRunsKey, playerBracketsKey,
+	raceBrackets, startRun, stopRun, captureBracket, captureDueBrackets,
+	readLeaderboard, readPlayerBrackets, readPlayerRecords,
+} = race;
