@@ -14,6 +14,10 @@ import * as types from 'xxscreeps/tsroot.js';
 // `classic` is declared as a dependency so that it always loads first: speedrun's rules are
 // expressed as adjustments on top of the vanilla ruleset, not as a replacement for it.
 //
+// Season 1 owns W1N1 through W9N9 only. All gameplay and map adjustments below are scoped to
+// that block; highways and other sectors keep vanilla behavior. A successful landing elsewhere
+// ends the old race clock without creating an old-season run. Player respawn remains global.
+//
 // Rules implemented so far, all configured under the `speedrun` key (see `config.ts`):
 //
 //    - `invaders` (default `false`): the periodic raid generator is suppressed by keeping rooms
@@ -69,7 +73,7 @@ import * as types from 'xxscreeps/tsroot.js';
 //      aimed at -- are dropped from the world's open-room list on every service start, which is
 //      what `Game.map.getRoomStatus()` reports as `closed`. Nothing inside them is read or deleted,
 //      and no other room is touched. See `main.ts` for the mechanism and `rooms.ts` for how the
-//      rooms are picked (out of the world's own sector records, not out of room names). Set it to
+//      rooms are picked (old-sector records only). Set it to
 //      `false` on a shard which wants its cores playable.
 //
 //    - `wallSectorCores` (default `true`): the nine rooms of each sector core are painted solid, and
@@ -85,15 +89,14 @@ import * as types from 'xxscreeps/tsroot.js';
 //                 [--exits 8] [--sources 1-4] [--mineral H|O|Z|K|U|L|X] [--no-objects]
 //                 [--template file.json] [--save file.json] [--dry-run] [--restore]
 //
-//      It overwrites every room of each sector's 9x9 interior -- everything but the core, 72 rooms of
-//      the stock world -- with one generated template, so no room is a better start than another.
+//      It overwrites only the old sector's 72 non-core rooms with one generated template, so no
+//      old-season room is a better start than another. No highway or other sector is rewritten.
 //      The template is `generate-room`'s own generator (`template.ts`), sharing its layout ranges,
 //      with one change: every side carries the same centred opening (`--exits`) instead of the exits
 //      the neighbours happen to have, so two rooms built from it share a border tile for tile and the
 //      whole grid walks through. A layout which would come out in several pieces is repaired rather
 //      than rerolled, so all 28 connect. Rooms around a core keep the face which looks at it shut,
-//      and the highway ring is opened on the faces which look at a covered room, or the outermost
-//      rooms would advertise exits the ring seals.
+//      and all highway terrain remains unchanged.
 //
 //      The objects follow the same idea. The template plans the tiles its sources, its mineral and
 //      its controller go on -- off the terrain, the way `room-gen` places them, so every one of them
@@ -103,7 +106,7 @@ import * as types from 'xxscreeps/tsroot.js';
 //      already stands on is nudged to the nearest free ground and the room is reported. `--no-objects`
 //      writes the terrain alone. Both stores are written under the game mutex, and both are kept
 //      before they are: the terrain under `speedrun/terrainBackup`, each rewritten room under
-//      `speedrun/uniformRoomBackup`. `--restore` writes both back. See `uniform.ts` for the write,
+//      `speedrun/uniformRoomBackup`. `--restore` merges only old-sector data back. See `uniform.ts` for the write,
 //      `place.ts` for the objects and `template.ts` for the plan.
 //
 // Providers are resolved as `<modDir>/<provide>.ts` or `<modDir>/<provide>/index.ts`; the ones

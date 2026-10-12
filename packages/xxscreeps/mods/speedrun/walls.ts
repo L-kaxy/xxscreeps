@@ -1,6 +1,7 @@
 import type { Terrain } from 'xxscreeps/game/terrain.js';
 import { makeSignedRoomName, parseSignedRoomName } from 'xxscreeps/game/room/name.js';
 import { TERRAIN_MASK_WALL, getBuffer, packExits } from 'xxscreeps/game/terrain.js';
+import { isSpeedrunRoom } from './scope.js';
 
 /**
  * The fields of a `World.terrain` entry this module rewrites. Everything else on the record -- in
@@ -60,7 +61,7 @@ function solid(terrain: Terrain) {
  * @returns The names of every room which was written to.
  */
 export function wallSectorCores<Record extends TerrainEntry>(terrain: Map<string, Record>, core: Iterable<string>): string[] {
-	const coreSet = new Set(core);
+	const coreSet = new Set([ ...core ].filter(isSpeedrunRoom));
 	const touched = new Set<string>();
 	for (const name of coreSet) {
 		const record = terrain.get(name);
@@ -74,7 +75,7 @@ export function wallSectorCores<Record extends TerrainEntry>(terrain: Map<string
 		const { rx, ry } = parseSignedRoomName(name);
 		for (const [ dx, dy ] of neighbors) {
 			const neighborName = makeSignedRoomName(rx + dx, ry + dy);
-			if (coreSet.has(neighborName)) {
+			if (!isSpeedrunRoom(neighborName) || coreSet.has(neighborName)) {
 				// The two cores share an edge and are both solid already.
 				continue;
 			}

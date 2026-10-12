@@ -1,8 +1,8 @@
+/** Season-1 settings for W1N1 through W9N9; player respawn itself remains account-wide. */
 export interface SpeedrunSettings {
 	/**
 	 * Whether the periodic raid generator runs. With this off a room's harvest budget is cleared on
-	 * every tick so no raiding party spawns. A room which banked a budget before this was switched
-	 * off may still see one last raid.
+	 * every tick before the generator runs so even a previously banked budget cannot spawn a raid.
 	 * @default false
 	 */
 	invaders?: boolean;
@@ -135,7 +135,7 @@ export interface SpeedrunSettings {
 
 export interface SpeedrunConfig {
 	/**
-	 * Speedrun ruleset settings
+	 * Season-1 ruleset settings for W1N1 through W9N9 only. Other sectors and highways are untouched.
 	 */
 	speedrun?: SpeedrunSettings;
 }

@@ -1,12 +1,12 @@
 import type { ProcessorContext } from 'xxscreeps/engine/processor/room.js';
 import type { RoomObject } from 'xxscreeps/game/object.js';
 import { config } from 'xxscreeps/config/index.js';
-import { registerIntentProcessor, registerRoomTickProcessor } from 'xxscreeps/engine/processor/index.js';
-import { intentProcessors } from 'xxscreeps/engine/processor/symbols.js';
+import { intentProcessors, roomTickProcessors } from 'xxscreeps/engine/processor/symbols.js';
 import { Game, me } from 'xxscreeps/game/index.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { Ruin } from 'xxscreeps/mods/classic/structure/ruin.js';
-import { raceBrackets, startRun } from './race.js';
+import { raceBrackets, startRun, stopRun } from './race.js';
+import { isSpeedrunRoom } from './scope.js';
 // The respawn rule chains the engine's `unspawn` handler instead of adding a registration of its
 // own, so it lives in a module of its own. See `respawn.ts`.
 import './respawn.js';
@@ -16,15 +16,10 @@ import './respawn.js';
 // raid. Parking `#cumulativeEnergyHarvested` at zero therefore keeps the generator from ever
 // reaching its threshold.
 //
-// Ordering: room tick processors run in registration order and `classic` is a dependency of this
-// mod, so the generator always reads the counter before this runs. What it reads is at most the
-// harvest of the previous tick — the harvest intents which increment the counter are applied after
-// the room tick processors of the same tick — which is orders of magnitude below the goal.
-//
-// A room which banked a budget before this mod was loaded may still spawn one last raid on the
-// first tick it is processed.
-registerRoomTickProcessor((room, context) => {
-	if (config.speedrun?.invaders === false && room['#cumulativeEnergyHarvested'] !== 0) {
+// Clear only season 1, before the vanilla generator, so even an old banked budget cannot create
+// one last raid. Harvest intents run later; the next tick clears their budget before generation.
+roomTickProcessors.unshift((room, context) => {
+	if (isSpeedrunRoom(room.name) && config.speedrun?.invaders === false && room['#cumulativeEnergyHarvested'] !== 0) {
 		room['#cumulativeEnergyHarvested'] = 0;
 		context.didUpdate();
 	}
@@ -36,21 +31,18 @@ registerRoomTickProcessor((room, context) => {
 // the object; that stage is therefore the one point every deposit and every power bank has to pass,
 // and the point this rule takes over.
 //
-// `registerIntentProcessor` appends to a list and `initializeIntentConstraints`
-// (`engine/processor/index.ts:137-201`) sorts that list, then hands the room stage the *first* entry
-// whose receiver matches the room (`room.ts:134`). Registering the same intent on `Room` while
-// naming that intent in `before` therefore shadows the generator's handler: the intent arrives, the
-// placement is dropped, and no object is created. Existing objects are not touched -- they keep
-// their tick processor, their decay and their schedule, so a generator which is switched back on
-// picks up where it left off (its next fire is at most one cadence away). Nothing is written to or
-// deleted from the world.
-//
-// The switch is read while the module loads, so flipping it needs a service restart.
-if (config.speedrun?.deposits !== true) {
-	registerIntentProcessor(Room, 'placeDeposit', { before: [ 'placeDeposit' ], internal: true }, () => {});
-}
-if (config.speedrun?.powerBanks !== true) {
-	registerIntentProcessor(Room, 'placePowerBank', { before: [ 'placePowerBank' ], internal: true }, () => {});
+// Chain rather than shadow each vanilla handler: only an old-sector placement can be dropped.
+// Highways and other seasons retain vanilla behavior. Existing resources keep their processors.
+for (const [ intent, setting ] of [ [ 'placeDeposit', 'deposits' ], [ 'placePowerBank', 'powerBanks' ] ] as const) {
+	const placement = intentProcessors.find(info => info.intent === intent && info.receiver === Room);
+	if (placement) {
+		const vanilla = placement.process;
+		placement.process = (room: Room, context: ProcessorContext, ...data: unknown[]) => {
+			if (!isSpeedrunRoom(room.name) || config.speedrun?.[setting] === true) {
+				vanilla(room, context, ...data);
+			}
+		};
+	}
 }
 
 // A destroyed structure leaves a ruin behind. Every lane which puts one down goes through
@@ -73,7 +65,7 @@ if (config.speedrun?.powerBanks !== true) {
 // (`mods/classic/creep/processor.ts`) and are not touched.
 Room.prototype['#insertObject'] = function(insertObject) {
 	return function(this: Room, object: RoomObject, now?: boolean) {
-		if (config.speedrun?.ruins === true || !(object instanceof Ruin)) {
+		if (!isSpeedrunRoom(this.name) || config.speedrun?.ruins === true || !(object instanceof Ruin)) {
 			insertObject.call(this, object, now);
 		}
 	};
@@ -91,8 +83,15 @@ const placeSpawn = intentProcessors.find(info => info.intent === 'placeSpawn' &&
 if (placeSpawn) {
 	const handover = placeSpawn.process;
 	placeSpawn.process = (room: Room, context: ProcessorContext, ...data: unknown[]) => {
+		const wasUnowned = room['#user'] === null;
 		handover(room, context, ...data);
-		if (raceBrackets().length !== 0) {
+		if (!wasUnowned || room['#user'] !== me) {
+			return;
+		}
+		if (!isSpeedrunRoom(room.name)) {
+			// A landing elsewhere supersedes the old clock, but never starts an old-season race.
+			context.task(stopRun(context.shard, me, Game.time));
+		} else if (raceBrackets().length !== 0) {
 			context.task(startRun(context.shard, me, room.name, Game.time));
 		}
 	};
