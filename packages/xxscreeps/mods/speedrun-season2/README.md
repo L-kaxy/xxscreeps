@@ -2,7 +2,7 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～3 步已由用户验收通过；第 4 步已实现新区块仅 `E3N3` 初始落地，完成自动测试，等待用户验收。新 mod 注册 `backend`、`config`、`processor`、`test` provider，API 和 processor 共用房间限制；地图仍是显式 CLI，不在启动时拍图。独立 Invader/claim/Ruin、比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 本步部署和验收见 [STEP4.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4.md)，前序记录见同目录 `STEP1.md`、`STEP2.md`、`STEP3.md`。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～3 步已由用户验收通过；用户确认第 4 步落地正常，追加外围房间朝封闭 highway 的出口封墙要求。本项已实现，等待补充验收，详见 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。新 mod 注册 `backend`、`config`、`processor`、`test` provider，API 和 processor 共用房间限制；地图和补墙仍是显式 CLI，不在启动时拍图。独立 Invader/claim/Ruin、比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 落地验收见 [STEP4.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4.md)，前序记录见同目录 `STEP1.md`、`STEP2.md`、`STEP3.md`。
 
 逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前停在第 4 步，第 5 步尚未开始。
 
@@ -49,7 +49,7 @@ W7N3 → E3N3
 W1N1 → E9N1
 ```
 
-这不是镜像。房内的墙、沼泽、平地，以及对象的 `(x, y)` 坐标全部保持不变；只改变对象所属房间及必须随之更新的房间引用。内部对象 ID 需保证不会与现有世界对象冲突。
+这不是镜像。固定资源保留原版墙、沼泽、平地和对象的 `(x, y)` 坐标；只改变对象所属房间及必须随之更新的房间引用。按 2026-10-13 追加要求，实际地图仅在新区块朝封闭 highway 的外围边界增加地形墙，内部布局和对象坐标不变。内部对象 ID 需保证不会与现有世界对象冲突。
 
 原图 `W7N3` 的初始自然对象如下，平移后用于 `E3N3`：
 
@@ -62,7 +62,7 @@ W1N1 → E9N1
 
 直接转换并拍入原版地形及初始地图对象布局，不随机生成、不修出口、不做额外的连通性或落地空间校验。不导入原始数据库中的玩家账号、代码、机器人 Spawn、排行榜或其他比赛状态。
 
-边界不增加封墙、跨区拦截或 portal 检查。先前要求的四条 highway 维持关闭状态，不额外改造其地形。赛季 2 的中央九房 `E4N4～E6N6` 保留原版地图，不被旧赛季启动钩子关闭或封墙。
+边界规则已按追加要求调整：外围普通房间朝封闭 highway 的一整条 50 格边界封为地形墙，并同步移除对应 exit 标记。四条 highway 全部关闭时，涉及 32 房、36 面；highway 本身不改地形或开放状态。内部连接不封，不增加额外跨区 intent 或 portal 检查。赛季 2 的中央九房 `E4N4～E6N6` 保留原版地图，不被关闭或封墙。新初始化自动包含此处理；已有地图停服执行 `season2-map --seal-highways --server-stopped` 补墙，不重拍、不动建筑。
 
 ## 旧地图备份和区块化改造
 

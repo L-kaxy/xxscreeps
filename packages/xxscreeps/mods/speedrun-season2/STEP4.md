@@ -2,6 +2,8 @@
 
 日期：2026-10-13。实现和自动测试已完成，**等待用户验收；第 5 步尚未开始。**
 
+用户已确认“落地测试正常”，并追加朝封闭过道的出口封墙。本补充实现和验收见 [STEP4-HIGHWAYS.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)，补墙确认前仍不进入第 5 步。
+
 本步只限制新区块初始落地。地图已在第 3 步初始化的测试副本中验收；**暂不在线上开放赛季 2**，独立 Invader/claim/Ruin、计时计分及清场仍未接入。
 
 ## 修改文件及原因
