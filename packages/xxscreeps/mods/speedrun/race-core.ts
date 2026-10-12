@@ -19,6 +19,8 @@ export interface RaceDefinition<Namespace extends string = string> {
 	/** Real seasons share a persistent activity guard; standalone core consumers remain independent. */
 	readonly isCurrentRun?: (shard: Shard, userId: string, info: Record<string, string>) => Promise<boolean>;
 	readonly withPlayerLock?: <Result>(shard: Shard, userId: string, task: () => Promise<Result>) => Promise<Result>;
+	/** Opt-in for new seasons: replaying a captured bracket must not overwrite its historical result. */
+	readonly captureOnce?: boolean;
 }
 
 /** Six account-level tables and two shard-level queues, all in the supplied namespace. */
@@ -147,7 +149,7 @@ function parseRecord(fields: Record<string, string>): RaceRecord {
  * Only the caller's namespace and room predicate participate in scheduling, scoring and reads.
  */
 export function createRace<Namespace extends string>({
-	namespace, containsRoom, getSettings, isCurrentRun, withPlayerLock,
+	namespace, containsRoom, getSettings, isCurrentRun, withPlayerLock, captureOnce = false,
 }: RaceDefinition<Namespace>) {
 	const keys = makeRaceKeys(namespace);
 	const { dueRunsKey, racingKey, runKey, scoreKey, rankKey, bestKey, playerRunsKey, playerBracketsKey } = keys;
@@ -259,6 +261,10 @@ export function createRace<Namespace extends string>({
 		}
 		if (isCurrentRun && !await isCurrentRun(shard, userId, runInfo)) {
 			await stopRun(shard, userId, time);
+			return undefined;
+		}
+		if (captureOnce && await shard.db.data.hGet(scoreKey(bracket, runId), 'tick') !== null) {
+			// Real season adapters hold the player lock across this check and all score/index writes.
 			return undefined;
 		}
 		const room = await shard.loadRoom(runInfo.room).catch(() => undefined);

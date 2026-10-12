@@ -21,6 +21,7 @@ import './spawn-test.js';
 import './invader-test.js';
 import './global-rules-test.js';
 import './lifecycle-test.js';
+import './score-test.js';
 
 const season1Mod = 'xxscreeps/mods/speedrun';
 const season2Mod = 'xxscreeps/mods/speedrun-season2';
@@ -66,9 +67,9 @@ async function inspectConfig(raw: object): Promise<ConfigInspection> {
 }
 
 describe('mods/speedrun-season2', () => {
-	test('global claim and ruin rules reuse season 1 without new providers', () => {
+	test('global claim and ruin rules reuse season 1; main only adds independent scoring', () => {
 		assert.deepStrictEqual(manifest.dependencies, [ season1Mod ]);
-		assert.deepStrictEqual(manifest.provides, [ 'backend', 'config', 'processor', 'test' ]);
+		assert.deepStrictEqual(manifest.provides, [ 'backend', 'config', 'main', 'processor', 'test' ]);
 	});
 
 	test('the real loader loads each season once, with season 1 first', () => {
@@ -76,7 +77,7 @@ describe('mods/speedrun-season2', () => {
 		assert.strictEqual(loaded.length, 2);
 		assert.match(loaded[0]!.url, /\/speedrun\/index\.js$/);
 		assert.match(loaded[1]!.url, /\/speedrun-season2\/index\.js$/);
-		assert.deepStrictEqual(Object.keys(loaded[1]!.provides), [ 'backend', 'config', 'processor', 'test' ]);
+		assert.deepStrictEqual(Object.keys(loaded[1]!.provides), [ 'backend', 'config', 'main', 'processor', 'test' ]);
 		assert.ok(config.speedrun);
 		assert.ok(config.speedrunSeason2);
 	});
@@ -163,7 +164,7 @@ describe('mods/speedrun-season2', () => {
 		assert.deepStrictEqual(result.speedrunSeason2, expectedDefaults);
 		assert.deepStrictEqual(result.speedrun, season1Defaults.speedrun);
 		assert.deepStrictEqual(result.seasonMods.map(mod => mod.name), [ 'speedrun', 'speedrun-season2' ]);
-		assert.deepStrictEqual(result.seasonMods[1]!.providers, [ 'backend', 'config', 'processor', 'test' ]);
+		assert.deepStrictEqual(result.seasonMods[1]!.providers, [ 'backend', 'config', 'main', 'processor', 'test' ]);
 	});
 
 	test('explicit dual-season overrides stay in their own roots', async () => {

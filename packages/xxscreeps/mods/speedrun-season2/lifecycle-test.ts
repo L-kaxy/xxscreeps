@@ -321,13 +321,13 @@ describe('season-2 lifecycle', () => {
 		assert.strictEqual((await active(shard)).active, false);
 	}));
 
-	test('step 8 does not drain season-2 due entries, score or automatically respawn at expiry', () => fresh(async ({ shard }) => {
+	test('scoring consumes due entries but does not automatically respawn at expiry', () => fresh(async ({ shard }) => {
 		const world = await worldOf(shard);
 		await processRoom(shard, world, 'E3N3');
 		const before = await shard.db.data.hGetAll(Season2.runKey('100'));
 		await runShardTickProcessors(shard, 50000);
 		assert.deepStrictEqual(await shard.db.data.hGetAll(Season2.runKey('100')), before);
-		assert.strictEqual(await shard.data.zCard(Season2.dueRunsKey), 2);
+		assert.strictEqual(await shard.data.zCard(Season2.dueRunsKey), 0);
 		assert.strictEqual(await shard.data.zCard(Season2.racingKey), 1);
 		assert.deepStrictEqual(Object.keys(await shard.db.data.hGetAll(keys2.scoreKey(20000, '100:1'))), []);
 		assert.deepStrictEqual(await acquireIntentsForRoom(shard, 'E3N3'), []);

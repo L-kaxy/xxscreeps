@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～7 步（含外围出口封墙、全图 claim/Ruin）已由用户验收通过。第 8 步已实现独立开局、计时队列及跨赛季活动身份校验，专项及基线回归已完成，等待用户验收。新 mod 仍注册 `backend`、`config`、`processor`、`test` provider，地图和补墙仍是显式 CLI，不在启动时拍图。**赛季 2 计分、自动重开、全区清场和页面尚未接入；中间步骤只在测试副本验收，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～8 步已由用户验收通过。第 9 步已实现独立计分、成绩索引及排名/历史存储读取，专项及基线回归已完成，等待用户验收。新 mod 注册 `backend`、`config`、`main`、`processor`、`test` provider；main 只采集新赛季档位成绩，地图和补墙仍是显式 CLI，不在启动时拍图。**赛季 2 自动重开、全区清场、排行榜 HTTP API 和页面尚未接入；中间步骤只在测试副本验收，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 8 步操作见 [STEP8.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP8.md)，本轮不提前开始第 9 步。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 9 步操作见 [STEP9.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP9.md)，本轮不提前开始第 10 步。
 
 ## 赛季范围和规则
 
@@ -154,7 +154,7 @@ API 层与实际 `placeSpawn` processor 共用赛季范围和落地限制：
 
 第 8 步已实现上述独立开局及双向切换。`speedrun/active/<userId>` 是账号级协调元数据，只标记 namespace、shard、run、room、startedTick 和 active，不存成绩；停止后保留 inactive 标记，旧版赛季 1 的无标记活动 run 仍兼容。启动/停止及旧赛季计分/到期任务通过玩家级数据库互斥避免切换交错，旧成绩键名保持不变；这不增加落地人数限制。
 
-初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。第 8 步只按档位建立 due/racing；新赛季到期队列暂不消费，不计分、不自动重开，后续分步接入。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
+初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。第 9 步已消费独立 due 并写入新 score/rank/best/runs/brackets，提供存储级排名与历史读取；赛季 2 快照按局/档位防重放，旧赛季默认行为不变。尚不自动重开或全区清场，也没有新 HTTP API/页面，后续分步接入。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
 
 ## Respawn 和赛季 2 全区清场
 
@@ -224,7 +224,7 @@ speedrun-season2/racing
 | `processor.ts` | 按区块处理玩法、落地、Invader 和清场 intent |
 | `respawn.ts` | 赛季 2 全区人造建筑清理 |
 | `race.ts` | 使用独立前缀的比赛状态、计分和读榜 |
-| `main.ts` | 赛季 2 的计分与到期重开任务，不封墙、不关闭中央九房 |
+| `main.ts` | 当前仅赛季 2 计分；到期重开第 11 步接入，不封墙、不关闭中央九房 |
 | `backend.ts` 及 `page.ts` | 独立榜单 API、页面和客户端入口 |
 | 旧 mod 的 `driver.ts` 及 `game.ts` | 复用唯一的全图 claim payload 和 API 限制，新 mod 不重复注册 |
 | 地图初始化工具及静态资源 | 导入原版地图并按平移映射写入新区块 |
