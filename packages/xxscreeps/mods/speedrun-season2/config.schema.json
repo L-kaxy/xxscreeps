@@ -1,0 +1,44 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "speedrunSeason2": {
+            "description": "Independent settings for E1N1 through E9N9. Step 1 loads configuration only; gameplay hooks are not implemented yet. Deposit and power bank switches remain global under speedrun.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "invaders": {
+                    "description": "Whether periodic Invader generation runs in the season-2 block.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "ruins": {
+                    "description": "Whether destroyed structures in the season-2 block leave ruins.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "respawnCleanup": {
+                    "description": "Whether season-2 respawn clears all artificial buildings and construction sites in its block. Player respawn itself remains global.",
+                    "type": "boolean",
+                    "default": true
+                },
+                "raceBrackets": {
+                    "description": "Tick offsets after a successful season-2 landing at which results are captured. An empty list disables scoring.",
+                    "type": "array",
+                    "items": { "type": "integer" },
+                    "default": [20000, 40000]
+                },
+                "respawnAfter": {
+                    "description": "Run duration in ticks before automatic respawn. Zero or less disables automatic respawn.",
+                    "type": "integer",
+                    "default": 40000
+                },
+                "claimController": {
+                    "description": "Whether creeps in the season-2 block may claim other controllers.",
+                    "type": "boolean",
+                    "default": false
+                }
+            }
+        }
+    }
+}

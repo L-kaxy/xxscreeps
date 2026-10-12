@@ -2,7 +2,7 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-确认日期：2026-10-12。当前只创建 mod 目录并保存方案，尚未实现或启用赛季 2 的运行逻辑。下文的模块、配置项和接口是后续开发约定，不代表已经可用。
+确认日期：2026-10-12。当前已建立第 1 步的 mod 骨架、独立配置、房间范围判断及测试，仅注册 `config` 和 `test` provider；赛季 2 运行逻辑尚未接入。地图初始化、落地限制、计分、清场和页面等仍为后续约定，不代表已经可用。第 1 步部署验收见 [STEP1.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP1.md)。
 
 逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 0 步已由用户确认通过。
 
@@ -224,7 +224,7 @@ speedrun-season2/racing
 
 旧赛季作必要的区块化和复用逻辑调整，不复制出两套互相竞争的全局钩子。共用逻辑接收显式赛季参数，两套 provider 分别注册自己的区块、配置、存储和接口。
 
-地图源数据后续固定为仓库内的静态资源，部署时不依赖开发机的 `screeps-server-mockup` 绝对路径。此阶段不创建空 manifest 或占位 provider，以免让尚未实现的 mod 被误加载。
+地图源数据后续固定为仓库内的静态资源，部署时不依赖开发机的 `screeps-server-mockup` 绝对路径。第 1 步 manifest 仅声明已实现的 `config` 和 `test`，不注册尚未实现的运行 provider，避免骨架加载时产生地图或玩法修改。
 
 ## 实施顺序和验收
 
