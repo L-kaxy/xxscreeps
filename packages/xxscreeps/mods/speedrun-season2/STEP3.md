@@ -4,6 +4,8 @@
 
 以下保留第 3 步交付时的功能边界和操作；当前进度以 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md) 为准。
 
+2026-10-13 追加变更：新初始化会在普通房间朝封闭 highway 的边界补墙；已有地图使用独立补墙命令，不重拍地图。见 [STEP4-HIGHWAYS.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。下方“原版地形不改”的历史描述不包含这项新边界处理。
+
 **仅在完整存档的测试副本中初始化。线上可以正常部署本步代码，但暂不要执行初始化命令。** E3N3 落地限制、独立 Invader/claim/Ruin、比赛与清场尚未实现，不能把本步地图当成可上线赛季。
 
 ## 修改文件及原因

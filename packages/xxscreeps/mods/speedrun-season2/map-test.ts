@@ -14,7 +14,7 @@ import { runOneShot } from 'xxscreeps/game/index.js';
 import { World, schema as worldSchema } from 'xxscreeps/game/map.js';
 import { RoomPosition } from 'xxscreeps/game/position.js';
 import { parseSignedRoomName } from 'xxscreeps/game/room/name.js';
-import { getBuffer } from 'xxscreeps/game/terrain.js';
+import { TerrainWriter, getBuffer, packExits } from 'xxscreeps/game/terrain.js';
 import { StructureController } from 'xxscreeps/mods/classic/controller/controller.js';
 import { create as createCreep } from 'xxscreeps/mods/classic/creep/creep.js';
 import { StructureExtractor } from 'xxscreeps/mods/classic/mineral/extractor.js';
@@ -22,10 +22,12 @@ import { Mineral } from 'xxscreeps/mods/classic/mineral/mineral.js';
 import { create as createRoad } from 'xxscreeps/mods/classic/road/road.js';
 import { StructureKeeperLair } from 'xxscreeps/mods/classic/source/keeper-lair.js';
 import { Source } from 'xxscreeps/mods/classic/source/source.js';
+import { create as createSpawn } from 'xxscreeps/mods/classic/spawn/spawn.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
 import * as C from 'xxscreeps:mods/constants';
-import { initializeSeason2Map, mapOpenRoomsBackupKey, mapStateKey, mapTerrainBackupKey, previewSeason2Map, restoreSeason2Map } from './map.js';
+import { closedHighwayFaces, planHighwaySealing } from './highways.js';
+import { highwayTerrainBackupKey, initializeSeason2Map, mapOpenRoomsBackupKey, mapStateKey, mapTerrainBackupKey, previewHighwaySealing, previewSeason2Map, restoreSeason2Map, sealSeason2Highways } from './map.js';
 import { buildSeason2Map, originalMap, season2MapRooms, translateOriginalRoom, translatedObjectId } from './original-map.js';
 
 const stopped = { serverStopped: true };
@@ -454,18 +456,319 @@ describe('season-2 map', () => {
 		withCli([ 'xxscreeps/mods/classic', 'xxscreeps/mods/speedrun-season2' ], async run => {
 			await assert.rejects(() => run('season2-map', '--initialize'), /Stop all services/);
 			await assert.rejects(() => run('season2-map', '--initialize', '--dry-run'), /Usage:/);
+			await assert.rejects(() => run('season2-map', '--seal-highways'), /Stop all services/);
+			await assert.rejects(() => run('season2-map', '--seal-highways', '--initialize', '--server-stopped'), /Usage:/);
 		}));
 
-	test('the real CLI previews, initializes, persists across processes and restores a temporary shard', () =>
+	test('the real CLI previews and initializes a temporary shard across processes', () =>
 		withCli([ 'xxscreeps/mods/classic', 'xxscreeps/mods/speedrun-season2' ], async run => {
 			await run('import', fixture);
 			const preview = JSON.parse(await run('season2-map')) as MapReport;
 			assert.deepStrictEqual([ preview.state, preview.written, preview.rooms, preview.objects ], [ 'ready', false, 81, 335 ]);
 			const initialized = JSON.parse(await run('season2-map', '--initialize', '--server-stopped')) as MapReport;
 			assert.deepStrictEqual([ initialized.state, initialized.written ], [ 'complete', true ]);
+		}));
+
+	test('the real CLI repeats initialization without rewriting rooms and restores a temporary shard', () =>
+		withInitializedCli(async run => {
 			const repeated = JSON.parse(await run('season2-map', '--initialize', '--server-stopped')) as MapReport;
 			assert.deepStrictEqual([ repeated.state, repeated.written ], [ 'complete', false ]);
 			const restored = JSON.parse(await run('season2-map', '--restore', '--server-stopped')) as MapReport;
 			assert.deepStrictEqual([ restored.state, restored.written ], [ 'restored', true ]);
+		}));
+});
+
+/** Emulate the previous initialized version without repainting any saved room or object. */
+async function legacyTerrain(shard: import('xxscreeps/engine/db/shard.js').Shard) {
+	await initializeSeason2Map(shard, stopped);
+	const world = await shard.loadWorld();
+	for (const [ name, record ] of buildSeason2Map(new Set(world.terrain.keys())).terrain) {
+		world.terrain.set(name, record);
+	}
+	await shard.data.set('terrain', makeWriter(worldSchema)(world.terrain, true));
+	return world;
+}
+
+/** One fixture process per CLI case keeps each test below the runner's 10-second budget. */
+function withInitializedCli<Type>(task: (run: (...args: string[]) => Promise<string>) => Promise<Type>, legacy = false) {
+	return withCli([ 'xxscreeps/mods/classic', 'xxscreeps/mods/speedrun-season2' ], async run => {
+		await run('eval', '-e', `(async () => {
+			const {readFile}=await import('node:fs/promises');
+			const {Database, Shard}=await import('xxscreeps/engine/db/index.js');
+			const {config}=await import('xxscreeps/config/index.js');
+			const {importPayload,seedShard}=await import('xxscreeps/scripts/payload.js');
+			const {initializeSeason2Map}=await import('xxscreeps/mods/speedrun-season2/map.js');
+			const {buildSeason2Map}=await import('xxscreeps/mods/speedrun-season2/original-map.js');
+			const {schema}=await import('xxscreeps/game/map.js');
+			const {makeWriter}=await import('xxscreeps/schema/write.js');
+			await using db=await Database.connect();
+			await using shard=await Shard.connect(db,config.shards[0].name);
+			await seedShard(shard,importPayload(JSON.parse(await readFile(${JSON.stringify(fixture)},'utf8'))));
+			await initializeSeason2Map(shard,{serverStopped:true});
+			if (${legacy}) {
+				const world=await shard.loadWorld();
+				for(const [name,record] of buildSeason2Map(new Set(world.terrain.keys())).terrain)world.terrain.set(name,record);
+				await shard.data.set('terrain',makeWriter(schema)(world.terrain,true));
+			}
+			await shard.save();
+			return 'temporary initialized terrain';
+		})()`);
+		return task(run);
+	});
+}
+
+function withLegacyCli<Type>(task: (run: (...args: string[]) => Promise<string>) => Promise<Type>) {
+	return withInitializedCli(task, true);
+}
+
+describe('season-2 highway exits', () => {
+	test('all four exterior directions and corner rooms face the correct highway', () => {
+		const closed = new Set<string>();
+		assert.deepStrictEqual(closedHighwayFaces('E1N9', closed), [
+			{ room: 'E1N9', side: 'top', highway: 'E1N10' },
+			{ room: 'E1N9', side: 'left', highway: 'E0N9' },
+		]);
+		assert.deepStrictEqual(closedHighwayFaces('E9N1', closed), [
+			{ room: 'E9N1', side: 'right', highway: 'E10N1' },
+			{ room: 'E9N1', side: 'bottom', highway: 'E9N0' },
+		]);
+		const plan = planHighwaySealing(makeMap().terrain, closed);
+		assert.strictEqual(plan.faces.length, 36);
+		assert.strictEqual(new Set(plan.faces.map(face => face.room)).size, 32);
+		for (const name of [ 'W1N1', 'E0N3', 'E10N3', 'E3N0', 'E3N10', 'E3N3', 'E5N5', 'E1S1', 'E01N1' ]) {
+			assert.deepStrictEqual(closedHighwayFaces(name, closed), [], name);
+		}
+	});
+
+	test('only outward edges change; every other tile and the raw source buffer remain exact', () => {
+		const { terrain } = makeMap();
+		const before = new Map([ ...terrain ].map(([ name, record ]) => [ name, Uint8Array.from(getBuffer(record.terrain)) ]));
+		const plan = planHighwaySealing(terrain, new Set());
+		for (const [ name, record ] of terrain) {
+			const after = plan.changes.get(name) ?? record;
+			for (let yy = 0; yy < 50; ++yy) {
+				for (let xx = 0; xx < 50; ++xx) {
+					const outward = (name[1] === '1' && xx === 0) || (name[1] === '9' && xx === 49)
+						|| (name[3] === '9' && yy === 0) || (name[3] === '1' && yy === 49);
+					assert.strictEqual(after.terrain.get(xx, yy), outward ? 1 : record.terrain.get(xx, yy), `${name}:${xx},${yy}`);
+				}
+			}
+			assert.strictEqual(after.exits, packExits(after.terrain));
+			assert.deepStrictEqual(getBuffer(record.terrain), before.get(name), 'copy-on-write preserves preview inputs');
+			assert.deepStrictEqual(after.sectors, record.sectors);
+			assert.deepStrictEqual(after.sectorControl, record.sectorControl);
+		}
+	});
+
+	test('an open highway is never sealed, and highways and season 1 are never modified', () => {
+		const { terrain } = makeMap();
+		const old = terrain.get('E1N3')!;
+		terrain.set('W1N1', old);
+		terrain.set('E0N3', old);
+		const plan = planHighwaySealing(terrain, new Set([ 'E0N3' ]));
+		assert.strictEqual(plan.faces.length, 35);
+		assert.strictEqual(plan.changes.has('E1N3'), false);
+		assert.strictEqual(plan.changes.has('W1N1'), false);
+		assert.strictEqual(plan.changes.has('E0N3'), false);
+		assert.ok(plan.changes.has('E1N2'));
+	});
+
+	test('fresh initialization seals exterior tiles and exit metadata without closing any season-2 room', () => fresh(async ({ shard }) => {
+		await initializeSeason2Map(shard, stopped);
+		const world = await shard.loadWorld();
+		const preview = await previewHighwaySealing(shard);
+		assert.deepStrictEqual([ preview.rooms, preview.edges, preview.written, preview.changedRooms.length ], [ 32, 36, false, 0 ]);
+		for (const name of season2MapRooms) {
+			assert.strictEqual(world.map.getRoomStatus(name).status, 'normal');
+			const exits = world.map.describeExits(name)!;
+			if (name[1] === '1') { assert.strictEqual(exits[7], undefined); }
+			if (name[1] === '9') { assert.strictEqual(exits[3], undefined); }
+			if (name[3] === '1') { assert.strictEqual(exits[5], undefined); }
+			if (name[3] === '9') { assert.strictEqual(exits[1], undefined); }
+		}
+	}));
+
+	test('preview of a legacy initialized map makes no writes, including backup and terrain padding', () => fresh(async ({ shard }) => {
+		await legacyTerrain(shard);
+		const before = await shard.data.req('terrain', { blob: true });
+		const journal = await shard.data.get(mapStateKey);
+		const preview = await previewHighwaySealing(shard);
+		assert.strictEqual(preview.edges, 36);
+		assert.ok(preview.changedRooms.length > 0);
+		assert.strictEqual(preview.written, false);
+		assert.deepStrictEqual(await shard.data.req('terrain', { blob: true }), before);
+		assert.strictEqual(await shard.data.get(mapStateKey), journal);
+		assert.strictEqual(await shard.data.get(highwayTerrainBackupKey, { blob: true }), null);
+	}));
+
+	test('retrofit protects all room buffers, occupants, clock, highway state, old terrain and scores', () => fresh(async ({ shard }) => {
+		await legacyTerrain(shard);
+		const room = await shard.loadRoom('E3N3');
+		room['#user'] = room.controller!['#user'] = '100';
+		room['#level'] = 1;
+		runOneShot(await shard.loadWorld(), room, shard.time, '', () => {
+			room['#insertObject'](createSpawn(new RoomPosition(2, 2, room.name), '100', 'PreservedSpawn'));
+			room['#insertObject'](createRoad(new RoomPosition(20, 20, room.name)));
+			room['#flushObjects'](null);
+		});
+		await shard.saveRoom(room.name, shard.time, room);
+		await shard.data.hSet('user/100', 'lastSpawnTime', '123');
+		await shard.db.data.hSet('speedrun/score/20000/100:1', 'controlPoints', '46200');
+		await shard.db.data.hSet('speedrun-season2/run/100', 'marker', 'preserve');
+		await shard.data.zAdd('speedrun-season2/due', [ [ 99999, 'preserve' ] ]);
+		const world = await shard.loadWorld();
+		const before = Uint8Array.from(world.terrainBlob);
+		const blobs = new Map<string, Readonly<Uint8Array> | null>();
+		for (const name of world.terrain.keys()) {
+			for (const slot of [ 0, 1 ]) {
+				const key = `room${slot}/${name}`;
+				blobs.set(key, await shard.data.get(key, { blob: true }));
+			}
+		}
+		const open = (await shard.data.sMembers('rooms')).sort();
+		const journal = await shard.data.get(mapStateKey);
+		const initBackup = await shard.data.req(mapTerrainBackupKey, { blob: true });
+		const time = await shard.data.get('time');
+		assert.strictEqual((await sealSeason2Highways(shard, stopped)).written, true);
+		const after = await shard.loadWorld();
+		const changed = new Set(planHighwaySealing(world.terrain, new Set(open)).changes.keys());
+		for (const [ name, record ] of world.terrain) {
+			if (!changed.has(name)) {
+				assert.deepStrictEqual(getBuffer(after.terrain.get(name)!.terrain), getBuffer(record.terrain), name);
+			}
+			assert.strictEqual(after.map.getRoomStatus(name).status, world.map.getRoomStatus(name).status);
+		}
+		for (const [ key, value ] of blobs) {
+			assert.deepStrictEqual(await shard.data.get(key, { blob: true }), value, key);
+		}
+		assert.deepStrictEqual(await shard.data.req(highwayTerrainBackupKey, { blob: true }), before);
+		assert.deepStrictEqual(await shard.data.req(mapTerrainBackupKey, { blob: true }), initBackup);
+		assert.deepStrictEqual((await shard.data.sMembers('rooms')).sort(), open);
+		assert.strictEqual(await shard.data.get(mapStateKey), journal);
+		assert.strictEqual(await shard.data.get('time'), time);
+		assert.strictEqual(await shard.data.hGet('user/100', 'lastSpawnTime'), '123');
+		assert.strictEqual(await shard.db.data.hGet('speedrun/score/20000/100:1', 'controlPoints'), '46200');
+		assert.strictEqual(await shard.db.data.hGet('speedrun-season2/run/100', 'marker'), 'preserve');
+		assert.deepStrictEqual(await shard.data.zRange('speedrun-season2/due', 0, -1), [ 'preserve' ]);
+		const second = await sealSeason2Highways(shard, stopped);
+		assert.deepStrictEqual([ second.written, second.changedRooms ], [ false, [] ]);
+		assert.deepStrictEqual(await shard.data.req(highwayTerrainBackupKey, { blob: true }), before);
+	}));
+
+	test('write acknowledgement and a real main-service lock guard retrofit too', () => fresh(async ({ shard }) => {
+		await legacyTerrain(shard);
+		await assert.rejects(() => sealSeason2Highways(shard, { serverStopped: false }), /acknowledgement/);
+		await using mutex = await Mutex.connect('main', shard.data, shard.pubsub);
+		await using lock = await mutex.acquire();
+		await assert.rejects(() => sealSeason2Highways(shard, stopped), /main service/);
+		assert.strictEqual(await shard.data.get(highwayTerrainBackupKey, { blob: true }), null);
+	}));
+
+	test('missing, prepared, restored and partial maps refuse retrofit before backup or terrain writes', () => fresh(async ({ shard }) => {
+		await assert.rejects(() => sealSeason2Highways(shard, stopped), /complete the season-2 map/);
+		await legacyTerrain(shard);
+		const raw = (await shard.data.get(mapStateKey))!;
+		for (const state of [ 'prepared', 'restored' ]) {
+			await shard.data.set(mapStateKey, JSON.stringify({ ...JSON.parse(raw), state }));
+			await assert.rejects(() => sealSeason2Highways(shard, stopped), /complete the season-2 map/);
+		}
+		await shard.data.set(mapStateKey, raw);
+		const world = await shard.loadWorld();
+		world.terrain.delete('E9N9');
+		await shard.data.set('terrain', makeWriter(worldSchema)(world.terrain, true));
+		await assert.rejects(() => sealSeason2Highways(shard, stopped), /incomplete/);
+		assert.strictEqual(await shard.data.get(highwayTerrainBackupKey, { blob: true }), null);
+	}));
+
+	test('concurrent retrofit serializes to one write and keeps the first backup', () => fresh(async ({ shard }) => {
+		await legacyTerrain(shard);
+		const before = await shard.data.req('terrain', { blob: true });
+		const reports = await Promise.all([ sealSeason2Highways(shard, stopped), sealSeason2Highways(shard, stopped) ]);
+		assert.strictEqual(reports.filter(report => report.written).length, 1);
+		assert.deepStrictEqual(await shard.data.req(highwayTerrainBackupKey, { blob: true }), before);
+	}));
+
+	test('a failed terrain write retains the original backup and allows an idempotent retry', () => fresh(async ({ shard }) => {
+		await legacyTerrain(shard);
+		const before = await shard.data.req('terrain', { blob: true });
+		const originalSave = shard.save.bind(shard);
+		shard.save = () => Promise.reject(new Error('injected backup save failure'));
+		try {
+			await assert.rejects(() => sealSeason2Highways(shard, stopped), /injected backup save failure/);
+		} finally {
+			shard.save = originalSave;
+		}
+		assert.deepStrictEqual(await shard.data.req('terrain', { blob: true }), before);
+		const originalSet = shard.data.set.bind(shard.data);
+		let saves = 0;
+		shard.save = () => { ++saves; return originalSave(); };
+		shard.data.set = (async (key: string, value: Value, options?: SetOptions) => {
+			if (key === 'terrain') {
+				assert.ok(saves > 0, 'persist the existing backup before retrying any terrain write');
+				throw new Error('injected terrain failure');
+			}
+			return originalSet(key, value, options);
+		}) as typeof shard.data.set;
+		try {
+			await assert.rejects(() => sealSeason2Highways(shard, stopped), /injected terrain failure/);
+		} finally {
+			shard.data.set = originalSet;
+			shard.save = originalSave;
+		}
+		assert.deepStrictEqual(await shard.data.req('terrain', { blob: true }), before);
+		assert.deepStrictEqual(await shard.data.req(highwayTerrainBackupKey, { blob: true }), before);
+		assert.strictEqual((await sealSeason2Highways(shard, stopped)).written, true);
+		assert.deepStrictEqual(await shard.data.req(highwayTerrainBackupKey, { blob: true }), before);
+	}));
+
+	test('actual creep movement cannot step onto any of the four sealed outward edges', () => fresh(async ({ shard }) => {
+		await initializeSeason2Map(shard, stopped);
+		const world = await shard.loadWorld();
+		for (const [ name, xx, yy, direction ] of [
+			[ 'E1N3', 1, 25, C.LEFT ], [ 'E9N3', 48, 25, C.RIGHT ],
+			[ 'E3N1', 25, 48, C.BOTTOM ], [ 'E3N9', 25, 1, C.TOP ],
+		] as const) {
+			const record = world.terrain.get(name)!;
+			const tiles = new TerrainWriter();
+			const plain = { ...record, terrain: tiles, exits: packExits(tiles) };
+			world.terrain.set(name, planHighwaySealing(new Map([ [ name, plain ] ]), new Set()).changes.get(name)!);
+			const room = await shard.loadRoom(name);
+			const creep = runOneShot(world, room, shard.time, '', () =>
+				createCreep(new RoomPosition(xx, yy, name), [ C.MOVE ], 'edge-test', '100'));
+			room['#insertObject'](creep);
+			room['#flushObjects'](null);
+			const context = new RoomProcessor(shard, world, room, shard.time);
+			context.saveIntents('100', { local: {}, object: { [creep.id]: { move: [ direction ] } } });
+			await context.process();
+			assert.deepStrictEqual([ creep.pos.x, creep.pos.y, creep.pos.roomName ], [ xx, yy, name ]);
+			// Positive control: closed highway status alone does not stop this same border crossing.
+			world.terrain.set(name, plain);
+			const openRoom = await shard.loadRoom(name);
+			const control = runOneShot(world, openRoom, shard.time, '', () =>
+				createCreep(new RoomPosition(xx, yy, name), [ C.MOVE ], 'unsealed-control', '100'));
+			openRoom['#insertObject'](control);
+			openRoom['#flushObjects'](null);
+			const openContext = new RoomProcessor(shard, world, openRoom, shard.time);
+			openContext.saveIntents('100', { local: {}, object: { [control.id]: { move: [ direction ] } } });
+			await openContext.process();
+			assert.strictEqual(openRoom['#objects'].some(object => object.id === control.id), false, 'unsealed control crosses the border');
+			assert.ok(openRoom['#eventLog'].some(event => event.event === C.EVENT_EXIT && event.objectId === control.id));
+		}
+	}));
+
+	test('the real CLI previews an older initialized map without reimporting rooms', () =>
+		withLegacyCli(async run => {
+			const preview = JSON.parse(await run('season2-map', '--seal-highways', '--dry-run')) as import('./map.js').HighwayReport;
+			assert.strictEqual(preview.written, false);
+			assert.strictEqual(preview.edges, 36);
+			assert.ok(preview.changedRooms.length > 0);
+		}));
+
+	test('the real CLI retrofit persists across processes and repeated execution writes nothing', () =>
+		withLegacyCli(async run => {
+			const sealed = JSON.parse(await run('season2-map', '--seal-highways', '--server-stopped')) as import('./map.js').HighwayReport;
+			assert.strictEqual(sealed.written, true);
+			const again = JSON.parse(await run('season2-map', '--seal-highways', '--server-stopped')) as import('./map.js').HighwayReport;
+			assert.deepStrictEqual([ again.written, again.changedRooms ], [ false, [] ]);
 		}));
 });

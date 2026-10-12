@@ -9,11 +9,22 @@ import { Mineral } from 'xxscreeps/mods/classic/mineral/mineral.js';
 import { StructureKeeperLair } from 'xxscreeps/mods/classic/source/keeper-lair.js';
 import { Source } from 'xxscreeps/mods/classic/source/source.js';
 import { makeWriter } from 'xxscreeps/schema/write.js';
+import { planHighwaySealing } from './highways.js';
 import { buildSeason2Map, originalMap, season2MapRooms, translateOriginalRoom } from './original-map.js';
 
 export const mapStateKey = 'speedrun-season2/mapState';
 export const mapTerrainBackupKey = 'speedrun-season2/mapBackup/terrain';
 export const mapOpenRoomsBackupKey = 'speedrun-season2/mapBackup/openRooms';
+export const highwayTerrainBackupKey = 'speedrun-season2/mapBackup/beforeHighwaySealing';
+
+export interface HighwayReport {
+	state: 'preview' | 'sealed';
+	written: boolean;
+	rooms: number;
+	edges: number;
+	faces: ReturnType<typeof planHighwaySealing>['faces'];
+	changedRooms: string[];
+}
 
 interface MapState {
 	format: 1;
@@ -127,6 +138,10 @@ export async function initializeSeason2Map(shard: Shard, options: { serverStoppe
 		}
 	}
 	const added = buildSeason2Map(new Set(world.terrain.keys()), occupiedIds);
+	// Raw terrain remains vendored unchanged; only faces towards closed exterior highways differ.
+	for (const [ name, record ] of planHighwaySealing(added.terrain, new Set(open)).changes) {
+		added.terrain.set(name, record);
+	}
 	const prepared: MapState = {
 		format: 1, state: 'prepared', sourceSha256: originalMap.source.sha256,
 		tick: Number(await shard.data.get('time')),
@@ -152,6 +167,51 @@ export async function initializeSeason2Map(shard: Shard, options: { serverStoppe
 	await shard.data.set(mapStateKey, JSON.stringify({ ...prepared, state: 'complete' }));
 	await Promise.all([ shard.db.save(), shard.save() ]);
 	return { ...report, state: 'complete', written: true };
+}
+
+async function highwayPlan(shard: Shard) {
+	const state = await readState(shard);
+	if (state?.state !== 'complete') {
+		throw new Error('Initialize and complete the season-2 map before sealing highway exits');
+	}
+	const { world, open } = await readMap(shard);
+	if (season2MapRooms.some(name => !world.terrain.has(name))) {
+		throw new Error('Season-2 terrain is incomplete; refusing partial highway sealing');
+	}
+	const plan = planHighwaySealing(world.terrain, new Set(open));
+	const report: HighwayReport = {
+		state: 'preview', written: false, rooms: new Set(plan.faces.map(face => face.room)).size,
+		edges: plan.faces.length, faces: plan.faces, changedRooms: [ ...plan.changes.keys() ].sort(),
+	};
+	return { world, plan, report };
+}
+
+/** Read-only preview for an already initialized block, including maps from the previous version. */
+export async function previewHighwaySealing(shard: Shard): Promise<HighwayReport> {
+	return (await highwayPlan(shard)).report;
+}
+
+/** Explicit terrain-only retrofit: no room buffers, occupants, buildings, clock or race writes. */
+export async function sealSeason2Highways(shard: Shard, options: { serverStopped: boolean }): Promise<HighwayReport> {
+	await requireStopped(shard, options.serverStopped);
+	await using mutex = await Mutex.connect('game', shard.data, shard.pubsub);
+	await using lock = await mutex.acquire();
+	await requireStopped(shard, options.serverStopped);
+	const { world, plan, report } = await highwayPlan(shard);
+	if (plan.changes.size === 0) {
+		return { ...report, state: 'sealed' };
+	}
+	if (await shard.data.get(highwayTerrainBackupKey, { blob: true }) === null) {
+		await shard.data.set(highwayTerrainBackupKey, Uint8Array.from(world.terrainBlob));
+	}
+	// Also a durability barrier on retry if a previous backup save failed in the same host.
+	await shard.save();
+	for (const [ name, record ] of plan.changes) {
+		world.terrain.set(name, record);
+	}
+	await shard.data.set('terrain', makeWriter(worldSchema)(world.terrain, true));
+	await shard.save();
+	return { ...report, state: 'sealed', written: true };
 }
 
 /**

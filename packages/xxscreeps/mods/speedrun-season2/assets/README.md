@@ -27,6 +27,8 @@
 
 资源保留原 `W` 房名，初始化时由 [original-map.ts](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/original-map.ts) 做 `W{x}N{y} → E{10-x}N{y}` 平移。不镜像房内坐标，不跑地图生成器、出口修复或连通性校验。
 
+固定 JSON 仍与原版资源相同；按追加要求，实际初始化再把新区块普通房间朝封闭 highway 的整条边界封为地形墙。仅改变对应外围边界和 exit 标记，内部布局与初始对象不变。已有地图可显式补墙，见 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
+
 资源通过静态 JSON import 随 TypeScript 构建复制到 `dist`。部署只需要本仓库及正常构建产物，**不访问开发机的原版私服目录**。
 
 本次已对原始数据库逐项核对：81 房、202500 个地形格及 335 个初始对象的类型与坐标一致。原库只用于提取及本次核对，自动测试和部署不依赖它。

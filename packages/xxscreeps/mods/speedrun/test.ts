@@ -7,6 +7,7 @@ import { runShardInitializers } from 'xxscreeps/engine/processor/shard.js';
 import { intentProcessors } from 'xxscreeps/engine/processor/symbols.js';
 import { Fn } from 'xxscreeps/functional/fn.js';
 import { instanceOfPredicate } from 'xxscreeps/functional/predicate.js';
+import { World, schema as worldSchema } from 'xxscreeps/game/map.js';
 import { RoomPosition } from 'xxscreeps/game/position.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { TERRAIN_MASK_WALL, TerrainWriter, getBuffer } from 'xxscreeps/game/terrain.js';
@@ -22,6 +23,7 @@ import { dueSectorsAt } from 'xxscreeps/mods/modern/deposit/model.js';
 import { inspectDuePowerBankRoomsForTest, scheduleRoom } from 'xxscreeps/mods/modern/powerbank/model.js';
 import { StructurePowerBank } from 'xxscreeps/mods/modern/powerbank/powerbank.js';
 import { computeRoomMeta, roomType } from 'xxscreeps/mods/modern/sector/terrain.js';
+import { makeWriter } from 'xxscreeps/schema/write.js';
 import { deterministicRandomForTesting } from 'xxscreeps/test/fixtures.js';
 import { testWorld } from 'xxscreeps/test/import.js';
 import { assert, describe, simulate, test } from 'xxscreeps/test/index.js';
@@ -1246,7 +1248,13 @@ describe('uniform rooms', () => {
 		const restored = await restoreUniform(shard);
 		assert.strictEqual(restored.terrain, true, 'the backup goes back');
 		assert.strictEqual(restored.rooms, report.roomsWritten, 'and so does every room which was rewritten');
-		assert.deepStrictEqual([ ...(await shard.data.get('terrain', { blob: true }))! ], original, 'and the world with it');
+		// World serialization may contain uninitialized padding. Compare every decoded field,
+		// reserialized with zeroed padding, rather than treating allocator bytes as game data.
+		assert.deepStrictEqual(
+			makeWriter(worldSchema)((await shard.loadWorld()).terrain, true),
+			makeWriter(worldSchema)(new World(shard.name, Uint8Array.from(original)).terrain, true),
+			'and the world with it',
+		);
 	}));
 
 	test('a template plans the same objects for every room, on ground with room to work', () => {

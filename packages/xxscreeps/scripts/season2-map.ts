@@ -1,28 +1,29 @@
-import type { MapReport } from 'xxscreeps/mods/speedrun-season2/map.js';
+import type { HighwayReport, MapReport } from 'xxscreeps/mods/speedrun-season2/map.js';
 import { checkArguments } from 'xxscreeps/config/arguments.js';
 import { config } from 'xxscreeps/config/index.js';
 import { Database, Shard } from 'xxscreeps/engine/db/index.js';
-import { initializeSeason2Map, previewSeason2Map, restoreSeason2Map } from 'xxscreeps/mods/speedrun-season2/map.js';
+import { initializeSeason2Map, previewHighwaySealing, previewSeason2Map, restoreSeason2Map, sealSeason2Highways } from 'xxscreeps/mods/speedrun-season2/map.js';
 
 // No service provider imports this command. No action flag means a read-only preview.
 async function main() {
 	const argv = checkArguments({
 		argv: true,
-		boolean: [ 'dry-run', 'initialize', 'restore', 'server-stopped' ] as const,
+		boolean: [ 'dry-run', 'initialize', 'restore', 'seal-highways', 'server-stopped' ] as const,
 		string: [ 'shard' ] as const,
 	});
-	if (argv.argv.length !== 0 || [ argv['dry-run'], argv.initialize, argv.restore ].filter(Boolean).length > 1) {
-		throw new Error('Usage: xxscreeps season2-map [--shard name] [--dry-run | --initialize | --restore] [--server-stopped]');
+	if (argv.argv.length !== 0 || [ argv.initialize, argv.restore, argv['seal-highways'] ].filter(Boolean).length > 1
+		|| (argv['dry-run'] && (argv.initialize || argv.restore))) {
+		throw new Error('Usage: xxscreeps season2-map [--shard name] [--initialize | --restore | --seal-highways [--dry-run]] [--server-stopped]');
 	}
 	if (config.speedrunSeason2 === undefined) {
 		throw new Error('Enable xxscreeps/mods/speedrun-season2 before using season2-map');
 	}
-	if ((argv.initialize || argv.restore) && !argv['server-stopped']) {
+	const write = argv.initialize || argv.restore || (argv['seal-highways'] && !argv['dry-run']);
+	if (write && !argv['server-stopped']) {
 		throw new Error('Stop all services first, then explicitly pass --server-stopped');
 	}
 	await using db = await Database.connect();
 	await using shard = await Shard.connect(db, argv.shard ?? config.shards[0]!.name);
-	const write = argv.initialize || argv.restore;
 	if (write) {
 		const localData = !/^redis[s]?:/.test(config.shards.find(info => info.name === shard.name)!.data);
 		if (localData) {
@@ -32,11 +33,15 @@ async function main() {
 			}
 		}
 	}
-	let report: MapReport;
+	let report: MapReport | HighwayReport;
 	if (argv.initialize) {
 		report = await initializeSeason2Map(shard, { serverStopped: argv['server-stopped'] });
 	} else if (argv.restore) {
 		report = await restoreSeason2Map(shard, { serverStopped: argv['server-stopped'] });
+	} else if (argv['seal-highways']) {
+		report = argv['dry-run']
+			? await previewHighwaySealing(shard)
+			: await sealSeason2Highways(shard, { serverStopped: argv['server-stopped'] });
 	} else {
 		report = await previewSeason2Map(shard);
 	}
