@@ -1,11 +1,12 @@
 /**
  * Independent season-2 settings for E1N1 through E9N9.
- * The initial-spawn room rule is fixed; these configurable gameplay hooks arrive in later steps.
+ * Initial spawn is fixed; periodic Invaders are configurable. Other gameplay hooks arrive later.
  * Deposits and power banks remain global switches under `speedrun`.
  */
 export interface SpeedrunSeason2Settings {
 	/**
 	 * Whether periodic Invader generation runs in the season-2 block.
+	 * Does not remove existing Invaders or disable Source Keepers or manual Invader requests.
 	 * @default false
 	 */
 	invaders?: boolean;
@@ -46,7 +47,7 @@ export interface SpeedrunSeason2Settings {
 export interface SpeedrunSeason2Config {
 	/**
 	 * Independent season-2 configuration; never falls back to season-1 settings.
-	 * Configurable gameplay rules are connected in subsequent development steps.
+	 * Initial spawn and periodic Invaders are connected; other rules arrive in subsequent steps.
 	 */
 	speedrunSeason2?: SpeedrunSeason2Settings;
 }

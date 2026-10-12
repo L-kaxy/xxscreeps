@@ -469,10 +469,14 @@ describe('season-2 map', () => {
 			assert.deepStrictEqual([ initialized.state, initialized.written ], [ 'complete', true ]);
 		}));
 
-	test('the real CLI repeats initialization without rewriting rooms and restores a temporary shard', () =>
+	test('the real CLI repeats initialization without rewriting rooms', () =>
 		withInitializedCli(async run => {
 			const repeated = JSON.parse(await run('season2-map', '--initialize', '--server-stopped')) as MapReport;
 			assert.deepStrictEqual([ repeated.state, repeated.written ], [ 'complete', false ]);
+		}));
+
+	test('the real CLI restores an initialized temporary shard', () =>
+		withInitializedCli(async run => {
 			const restored = JSON.parse(await run('season2-map', '--restore', '--server-stopped')) as MapReport;
 			assert.deepStrictEqual([ restored.state, restored.written ], [ 'restored', true ]);
 		}));

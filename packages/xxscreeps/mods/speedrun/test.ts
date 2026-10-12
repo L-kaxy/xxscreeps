@@ -89,6 +89,8 @@ describe('mods/speedrun', () => {
 		test('invaders on: a banked budget still spawns a raid', () => banked(async ({ player, tick }) => {
 			using raidGeneration = withInvaders(true);
 			await player('100', Game => {
+				// Persist the asynchronous vanilla raid even if terrain blocks the attempted move.
+				Game.creeps.dummy?.say('raid test');
 				Game.creeps.dummy?.move(C.TOP);
 			});
 			await tick();

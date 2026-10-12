@@ -1,10 +1,10 @@
 # 赛季 2 第 4 步 初始落地限制验收
 
-日期：2026-10-13。实现和自动测试已完成，**等待用户验收；第 5 步尚未开始。**
+日期：2026-10-13。实现和自动测试已完成；用户确认落地正常，并在封墙补充完成后确认“通过 下一步”，**第 4 步已验收通过，授权进入第 5 步。**
 
-用户已确认“落地测试正常”，并追加朝封闭过道的出口封墙。本补充实现和验收见 [STEP4-HIGHWAYS.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)，补墙确认前仍不进入第 5 步。
+用户已确认“落地测试正常”，并追加朝封闭过道的出口封墙。本补充实现和验收见 [STEP4-HIGHWAYS.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)，后续 Invader 步骤见 [STEP5.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP5.md)。
 
-本步只限制新区块初始落地。地图已在第 3 步初始化的测试副本中验收；**暂不在线上开放赛季 2**，独立 Invader/claim/Ruin、计时计分及清场仍未接入。
+本步只限制新区块初始落地。地图已在第 3 步初始化的测试副本中验收；**暂不在线上开放赛季 2**。第 4 步交付时尚未接入独立 Invader/claim/Ruin、计时计分及清场，后续实现按 TODO 单独验收。
 
 ## 修改文件及原因
 
@@ -134,7 +134,7 @@ await trySpawn("E3N3", 2, 2);
 
 ## 用户确认
 
-- [ ] 新区块非法房间拒绝，且不消耗落地冷却。
-- [ ] `E3N3` 合法空地可以落地，原版占用/presence/位置/冷却检查仍有效。
-- [ ] 旧赛季落地及比赛正常；新区块尚不产生比赛数据。
-- [ ] 用户确认第 4 步通过，才开始第 5 步 Invader 独立控制。
+- [x] 新区块非法房间拒绝，且不消耗落地冷却。
+- [x] `E3N3` 合法空地可以落地，原版占用/presence/位置/冷却检查仍有效。
+- [x] 旧赛季落地及比赛正常；新区块尚不产生比赛数据。
+- [x] 用户确认落地正常，并在封墙补充完成后确认“通过 下一步”，授权开始第 5 步 Invader 独立控制。

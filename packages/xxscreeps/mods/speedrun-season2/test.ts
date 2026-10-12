@@ -18,6 +18,7 @@ import { isSeason2Room, isSeason2SpawnRoom, season2SpawnRoom } from './rooms.js'
 import { manifest } from './index.js';
 import './map-test.js';
 import './spawn-test.js';
+import './invader-test.js';
 
 const season1Mod = 'xxscreeps/mods/speedrun';
 const season2Mod = 'xxscreeps/mods/speedrun-season2';
@@ -65,7 +66,7 @@ async function inspectConfig(raw: object): Promise<ConfigInspection> {
 }
 
 describe('mods/speedrun-season2', () => {
-	test('step 4 registers only config, test and initial-spawn providers', () => {
+	test('step 5 retains the existing providers without adding a map or race provider', () => {
 		assert.deepStrictEqual(manifest.dependencies, [ season1Mod ]);
 		assert.deepStrictEqual(manifest.provides, [ 'backend', 'config', 'processor', 'test' ]);
 	});

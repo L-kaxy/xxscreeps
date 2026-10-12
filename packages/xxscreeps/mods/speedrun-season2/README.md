@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～3 步已由用户验收通过；用户确认第 4 步落地正常，追加外围房间朝封闭 highway 的出口封墙要求。本项已实现，等待补充验收，详见 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。新 mod 注册 `backend`、`config`、`processor`、`test` provider，API 和 processor 共用房间限制；地图和补墙仍是显式 CLI，不在启动时拍图。独立 Invader/claim/Ruin、比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 落地验收见 [STEP4.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4.md)，前序记录见同目录 `STEP1.md`、`STEP2.md`、`STEP3.md`。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～4 步（含外围出口封墙）已由用户验收通过。第 5 步在原有 `processor` provider 中接入按新区块控制的周期 Invader 开关，验收见 [STEP5.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP5.md)。新 mod 仍注册 `backend`、`config`、`processor`、`test` provider，地图和补墙仍是显式 CLI，不在启动时拍图。独立 claim/Ruin、比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前停在第 4 步，第 5 步尚未开始。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前停在第 5 步，第 6 步尚未开始。
 
 ## 赛季范围和规则
 
@@ -130,7 +130,7 @@ speedrunSeason2:
 
 `false` 关闭所属区块的周期入侵生成，`true` 恢复该区块的原版周期生成。旧赛季不得再清零新区块的预算，否则赛季 2 即使启用 Invader 也不会生效。实现时注意原版生成器与预算清理的执行顺序，避免禁用后仍因首次处理的旧预算生成一波入侵。
 
-该开关延续旧配置控制周期生成的含义，不默认删除已有 Invader，也不关闭 Source Keeper；赛季 2 中央九房的原生机制继续运行。主动请求 Invader 的 `/api/game/create-invader` 是另一入口，其是否跟随开关需在实现时明确，不把范围调整误作新玩法规则。
+该开关延续旧配置控制周期生成的含义，不删除已有 Invader，也不关闭 Source Keeper；赛季 2 中央九房的原生机制继续运行。第 5 步明确：主动请求 Invader 的 `/api/game/create-invader` 及 `requestInvader` 内部 intent 保持原规则，不跟随两个周期生成开关；没有添加 API 包装或删除 NPC 的逻辑。
 
 其他复用的基础玩法钩子也要避免全局覆盖，例如旧 mod 对 Ruin 插入的包装，应按房间选择对应赛季配置。**deposit 和 power bank 生成开关明确保留全图生效**：由 `speedrun.deposits` 和 `speedrun.powerBanks` 统一控制，包括 highway、新旧赛季及其他区块；关闭只阻止新增，不删除已有资源。赛季 2 不叠加资源生成包装或独立开关。
 
