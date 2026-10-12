@@ -1,6 +1,6 @@
 /**
  * Independent season-2 settings for E1N1 through E9N9.
- * Step 1 only loads and validates these settings; gameplay hooks are added in later steps.
+ * The initial-spawn room rule is fixed; these configurable gameplay hooks arrive in later steps.
  * Deposits and power banks remain global switches under `speedrun`.
  */
 export interface SpeedrunSeason2Settings {
@@ -46,7 +46,7 @@ export interface SpeedrunSeason2Settings {
 export interface SpeedrunSeason2Config {
 	/**
 	 * Independent season-2 configuration; never falls back to season-1 settings.
-	 * The configuration-only skeleton does not yet enforce gameplay rules.
+	 * Configurable gameplay rules are connected in subsequent development steps.
 	 */
 	speedrunSeason2?: SpeedrunSeason2Settings;
 }

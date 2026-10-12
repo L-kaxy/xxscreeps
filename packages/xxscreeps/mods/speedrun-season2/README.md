@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-确认日期：2026-10-12。第 0～2 步已由用户验收通过；第 3 步已固定原版地图资源，提供 `season2-map` 显式预览、停服初始化及回滚命令，完成自动测试，等待用户验收。新 mod 仍仅注册 `config` 和 `test` provider，不在启动时拍图；赛季 2 落地限制、独立玩法、比赛、清场和页面尚未接入。**本步只在测试副本初始化，不在线上开放未完成的赛季 2。** 部署验收见 [STEP1.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP1.md)、[STEP2.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP2.md) 和 [STEP3.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP3.md)。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～3 步已由用户验收通过；第 4 步已实现新区块仅 `E3N3` 初始落地，完成自动测试，等待用户验收。新 mod 注册 `backend`、`config`、`processor`、`test` provider，API 和 processor 共用房间限制；地图仍是显式 CLI，不在启动时拍图。独立 Invader/claim/Ruin、比赛、清场和页面尚未接入。**中间步骤只在测试副本初始化、落地，不在线上开放未完成的赛季 2。** 本步部署和验收见 [STEP4.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4.md)，前序记录见同目录 `STEP1.md`、`STEP2.md`、`STEP3.md`。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前停在第 3 步，第 4 步尚未开始。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；当前停在第 4 步，第 5 步尚未开始。
 
 ## 赛季范围和规则
 
