@@ -16,6 +16,7 @@ import { initializationDefaults } from './config.js';
 import schema from './config.schema.json' with { type: 'json' };
 import { isSeason2Room, isSeason2SpawnRoom, season2SpawnRoom } from './rooms.js';
 import { manifest } from './index.js';
+import './map-test.js';
 
 const season1Mod = 'xxscreeps/mods/speedrun';
 const season2Mod = 'xxscreeps/mods/speedrun-season2';
