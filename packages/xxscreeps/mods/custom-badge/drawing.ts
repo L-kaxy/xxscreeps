@@ -22,6 +22,8 @@ export interface Shape {
 
 export interface Drawing {
 	schemaVersion: 1;
+	/** SVG uploads are preview/save-only in Studio, including after reloading a draft. */
+	source?: 'svg';
 	colors: [ string, string, string ];
 	shapes: Shape[];
 }
@@ -117,7 +119,10 @@ function parseLocalPath(value: unknown, limits: Limits): string {
 }
 
 export function parseDrawing(value: unknown, limits = defaultLimits): Drawing {
-	const drawing = object(value, [ 'schemaVersion', 'colors', 'shapes' ]);
+	const drawing = object(value, [ 'schemaVersion', 'source', 'colors', 'shapes' ]);
+	if (drawing.source !== undefined && drawing.source !== 'svg') {
+		throw new DrawingError('设计来源不合法');
+	}
 	if (drawing.schemaVersion !== 1 || !Array.isArray(drawing.colors) || drawing.colors.length !== 3 ||
 		!drawing.colors.every((color: unknown) => typeof color === 'string' && color.length === 7 && /^#[0-9a-f]{6}$/i.test(color))) {
 		throw new DrawingError('需要版本 1 和三个 #rrggbb 颜色');
@@ -162,7 +167,11 @@ export function parseDrawing(value: unknown, limits = defaultLimits): Drawing {
 		};
 	});
 	const [ first, second, third ] = drawing.colors as [ string, string, string ];
-	return { schemaVersion: 1, colors: [ first.toLowerCase(), second.toLowerCase(), third.toLowerCase() ], shapes };
+	return {
+		schemaVersion: 1,
+		...drawing.source === 'svg' ? { source: 'svg' as const } : {},
+		colors: [ first.toLowerCase(), second.toLowerCase(), third.toLowerCase() ], shapes,
+	};
 }
 
 function transform(shape: Shape, point: Point, mirror = true): Point {

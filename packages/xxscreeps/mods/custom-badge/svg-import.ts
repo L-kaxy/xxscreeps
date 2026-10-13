@@ -352,7 +352,9 @@ export function importSvg(source: string, limits: Limits = defaultLimits,
 		for (const record of records) {
 			let index = palette.indexOf(record.color);
 			if (index === -1) { index = palette.length; palette.push(record.color); }
-			if (index > 1) { throw new DrawingError('SVG 最多支持两个前景色和一个背景色，请先减少颜色'); }
+			if (index > 1) {
+				throw new DrawingError('游戏原生 Badge 只能表示一个背景色和两个前景色，无法保留此 SVG 的全部颜色；未导入，也不会自动减色或替换颜色');
+			}
 			if (index < previous) { throw new DrawingError('SVG 的两种前景色交错叠放，不能无损转换为两个图层；请先按颜色整理层级'); }
 			previous = index;
 			commands += record.path.length;
@@ -362,7 +364,7 @@ export function importSvg(source: string, limits: Limits = defaultLimits,
 		for (let index = 0; index < palette.length; ++index) { colors[index + 1] = palette[index]!; }
 		const shapes = layers.flatMap((path, index) => path.length ? [ importedShape(path, index === 0 ? 1 : 2) ] : []);
 		if (shapes.length === 0 && !hasBackground) { throw new DrawingError('SVG 中没有可导入的图案'); }
-		const compiled = compileDrawing({ schemaVersion: 1, colors, shapes }, limits).drawing;
+		const compiled = compileDrawing({ schemaVersion: 1, source: 'svg', colors, shapes }, limits).drawing;
 		// Keep enough room for version/publish and the enclosing JSON object in the existing API.
 		if (new TextEncoder().encode(JSON.stringify(compiled)).byteLength > maxRequestBytes - 256) {
 			throw new DrawingError('转换后的 SVG 设计超过保存接口的 64 KiB 限额，请先简化路径');
