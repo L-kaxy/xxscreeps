@@ -1,4 +1,5 @@
 import type { Drawing, Limits, Point, Shape } from './drawing.js';
+import type { SvgImportReport } from './svg-import.js';
 import { compileDrawing, defaultLimits, maxPoints, maxRequestBytes, newDrawing, polygonFromCanvas, shapePath } from './drawing.js';
 import { importSvg } from './svg-import.js';
 
@@ -62,6 +63,19 @@ function status(message: string, kind = '') {
 	const node = byId('status');
 	node.textContent = message;
 	node.className = `status ${kind}`;
+}
+
+function importReport(report: SvgImportReport) {
+	const panel = byId<HTMLDetailsElement>('svg-import-report');
+	const lines = [
+		...report.filtered.map(item => `已过滤 ${item}`),
+		...report.notes,
+	];
+	// Attribute/element names come from untrusted input: text only, never HTML.
+	byId('svg-import-output').textContent = lines.join('\n');
+	byId('svg-import-summary').textContent = `最近一次 SVG 导入处理说明 · ${report.filtered.length} 项过滤 · ${report.notes.length} 项提示`;
+	panel.hidden = lines.length === 0;
+	panel.open = lines.length !== 0;
 }
 
 function setToken(value: string) {
@@ -166,11 +180,8 @@ function preview(size: number) {
 const labels = { circle: '圆形', rectangle: '矩形', triangle: '三角形', polygon: '多边形', path: 'SVG 路径' };
 const selectedShape = () => drawing.shapes.find(shape => shape.id === selected);
 const serialize = () => JSON.stringify(drawing);
-// Older SVG drafts predate source metadata, but their imported paths must also remain read-only.
-const uploadedSvg = () => drawing.source === 'svg' || drawing.shapes.some(shape => shape.kind === 'path');
 
 function updateControls() {
-	const readOnly = uploadedSvg();
 	const canSave = profile !== null && options.enabled && !profile.blocked && !busy && polygon === null;
 	button('publish').disabled = !canSave;
 	button('save-draft').disabled = !canSave;
@@ -188,13 +199,13 @@ function updateControls() {
 	button('steam-login').hidden = !options.auth.steam;
 	for (const node of document.querySelectorAll<HTMLButtonElement | HTMLInputElement>('#login-panel button,#login-panel input')) { node.disabled = busy; }
 	for (const node of document.querySelectorAll<HTMLButtonElement>('[data-kind],#polygon')) {
-		node.disabled = busy || readOnly || polygon !== null || drawing.shapes.length >= options.maxShapes;
+		node.disabled = busy || polygon !== null || drawing.shapes.length >= options.maxShapes;
 	}
-	input('add-layer').disabled = busy || readOnly;
-	for (const node of document.querySelectorAll<HTMLInputElement>('.colors input')) { node.disabled = busy || readOnly; }
-	for (const node of document.querySelectorAll<HTMLButtonElement>('#layers button')) { node.disabled = busy || readOnly || polygon !== null; }
-	byId<HTMLFieldSetElement>('properties').disabled = busy || readOnly || selectedShape() === undefined || polygon !== null;
-	button('duplicate').disabled = busy || readOnly || drawing.shapes.length >= options.maxShapes;
+	input('add-layer').disabled = busy;
+	for (const node of document.querySelectorAll<HTMLInputElement>('.colors input')) { node.disabled = busy; }
+	for (const node of document.querySelectorAll<HTMLButtonElement>('#layers button')) { node.disabled = busy || polygon !== null; }
+	byId<HTMLFieldSetElement>('properties').disabled = busy || selectedShape() === undefined || polygon !== null;
+	button('duplicate').disabled = busy || drawing.shapes.length >= options.maxShapes;
 	byId('admin-panel').hidden = profile?.isAdmin !== true;
 	for (const node of document.querySelectorAll<HTMLButtonElement>('#admin-panel button')) { node.disabled = busy; }
 	byId('account').textContent = profile ? `${profile.username} · 已登录` : '本地预览 · 未登录';
@@ -202,8 +213,7 @@ function updateControls() {
 	byId('polygon-tools').hidden = polygon === null;
 	button('finish-polygon').disabled = busy || polygon === null || polygon.length < 3;
 	button('cancel-polygon').disabled = busy;
-	byId('canvas-help').textContent = readOnly ? '上传 SVG · 只读预览，保留导入颜色；修改请编辑原文件后重新上传' :
-		polygon === null ? '拖动图形调整位置 · 右侧编辑尺寸与角度' : `点击画布添加顶点 (${polygon.length}/${maxPoints})，然后点「完成多边形」`;
+	byId('canvas-help').textContent = polygon === null ? '拖动图形调整位置 · 右侧编辑尺寸与角度' : `点击画布添加顶点 (${polygon.length}/${maxPoints})，然后点「完成多边形」`;
 	const notice = byId('notice');
 	if (!options.enabled) {
 		notice.textContent = '服务器已暂停保存。仍可在本地预览，已佩戴头像不受影响。';
@@ -223,10 +233,10 @@ function updateControls() {
 function render() {
 	try {
 		canvas.replaceChildren();
-		artwork(canvas, 'clip-canvas', !uploadedSvg());
+		artwork(canvas, 'clip-canvas', true);
 		canvas.append(svgNode('circle', { cx: 50, cy: 50, r: 52, fill: 'none', stroke: '#70898b', 'stroke-width': 0.3, 'stroke-dasharray': '1 1', 'pointer-events': 'none' }));
 		const shape = selectedShape();
-		if (shape && polygon === null && !uploadedSvg()) {
+		if (shape && polygon === null) {
 			canvas.append(svgNode('path', { d: shapePath(shape), fill: 'none', stroke: '#f5d58a', 'stroke-width': 0.5, 'stroke-dasharray': '1 1', 'pointer-events': 'none' }));
 		}
 		if (polygon) {
@@ -270,8 +280,8 @@ function remember(before: string) {
 	}
 }
 
-function edit(change: () => void, replace = false) {
-	if (busy || (uploadedSvg() && !replace)) { return; }
+function edit(change: () => void) {
+	if (busy) { return; }
 	const before = serialize();
 	try {
 		change();
@@ -298,7 +308,7 @@ for (const node of document.querySelectorAll<HTMLButtonElement>('[data-kind]')) 
 		selected = shape.id;
 	}));
 }
-button('polygon').addEventListener('click', () => { if (busy || uploadedSvg()) { return; } polygon = []; render(); });
+button('polygon').addEventListener('click', () => { if (busy) { return; } polygon = []; render(); });
 button('cancel-polygon').addEventListener('click', () => { polygon = null; render(); });
 button('finish-polygon').addEventListener('click', () => {
 	if (polygon === null) { return; }
@@ -344,7 +354,7 @@ button('duplicate').addEventListener('click', () => edit(() => {
 button('new').addEventListener('click', () => {
 	if (confirm('新建空白设计？可以使用撤销恢复，尚未保存到服务器。')) {
 		polygon = null;
-		edit(() => { drawing = { schemaVersion: 1, colors: [ ...drawing.colors ], shapes: [] }; selected = null; }, true);
+		edit(() => { drawing = { schemaVersion: 1, colors: [ ...drawing.colors ], shapes: [] }; selected = null; });
 	}
 });
 
@@ -358,17 +368,22 @@ input('svg-file').addEventListener('change', () => {
 		if (file.size > maxRequestBytes) { throw new Error('SVG 文件不能超过 64 KiB'); }
 		// Parse first, then ask before replacing a valid design. A failed/cancelled import leaves
 		// the drawing, undo history, version and server data completely unchanged.
-		// Native badges have no transparent background. Use an explicit white backing, never
-		// carry unrelated editor colors into an uploaded SVG.
-		const imported = importSvg(await file.text(), options, [ '#ffffff', '#000000', '#000000' ]);
+		const report: SvgImportReport = { filtered: [], notes: [] };
+		let imported: Drawing;
+		try {
+			imported = importSvg(await file.text(), options, [ '#ffffff', '#000000', '#000000' ], report);
+		} finally {
+			// Keep filtering details visible even if the remaining artwork cannot be imported.
+			importReport(report);
+		}
 		if ((dirty || drawing.shapes.length !== 0) && !confirm('导入 SVG 将替换当前设计，可以使用撤销恢复。是否继续？')) { return; }
 		const before = serialize();
 		drawing = imported;
 		polygon = null;
-		selected = null;
+		selected = drawing.shapes[0]?.id ?? null;
 		remember(before);
 		render();
-		status('SVG 已导入，只提供预览和保存，不允许调色或编辑图形。无背景的 SVG 以白底显示（原生 Badge 不支持透明背景）。确认预览后点击「保存并应用」；当前游戏头像尚未改变。', 'success');
+		status(`SVG 已导入，最底层填色已设为背景色；可调色、拖动、缩放、旋转和镜像。${report.filtered.length ? '已过滤不支持的内容，详见下方处理说明。' : ''}确认预览后点击「保存并应用」；当前游戏头像尚未改变。`, 'success');
 	});
 });
 
@@ -403,7 +418,7 @@ function position(event: PointerEvent): Point {
 }
 const clamp = (value: number) => Math.round(Math.max(0, Math.min(100, value)) * 1000) / 1000;
 canvas.addEventListener('pointerdown', event => {
-	if (busy || uploadedSvg() || event.button !== 0 || drag) { return; }
+	if (busy || event.button !== 0 || drag) { return; }
 	event.preventDefault();
 	const point = position(event);
 	if (polygon !== null) {
@@ -419,7 +434,6 @@ canvas.addEventListener('pointerdown', event => {
 	render();
 });
 canvas.addEventListener('pointermove', event => {
-	if (uploadedSvg()) { return; }
 	const shape = selectedShape();
 	if (drag?.pointer !== event.pointerId || !shape) { return; }
 	const point = position(event);
@@ -450,9 +464,7 @@ async function loadAccount(replace: boolean) {
 		selected = drawing.shapes[0]?.id ?? null;
 	}
 	render();
-	status(dirty ? '已登录，保留了你的本地设计。保存将更新此账号的草稿。' :
-		uploadedSvg() ? '已载入 SVG 草稿，只读预览，颜色不可修改。可直接点击「保存并应用」。' :
-			'已载入账号草稿。修改完成后点击「保存并应用」。', 'success');
+	status(dirty ? '已登录，保留了你的本地设计。保存将更新此账号的草稿。' : '已载入账号草稿。可调色和编辑，完成后点击「保存并应用」。', 'success');
 }
 
 byId<HTMLFormElement>('login-form').addEventListener('submit', event => {

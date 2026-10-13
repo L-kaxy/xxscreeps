@@ -36,6 +36,13 @@ const names: Record<string, string> = {
 	navy: '#000080', olive: '#808000', purple: '#800080', teal: '#008080', orange: '#ffa500',
 };
 
+export interface SvgImportReport {
+	filtered: string[];
+	notes: string[];
+}
+
+type Filter = (item: string, reason: string) => void;
+
 function scalar(value: string, min = -1000000, max = 1000000, pixels = false) {
 	const text = value.trim();
 	const pattern = pixels ? /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(?:px)?$/i : /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i;
@@ -95,68 +102,121 @@ interface Style {
 	fillOpacity: number;
 }
 
-function appearance(element: Element, inherited: Style, clips: Set<string>): Style {
+function checkPresentation(key: string, value: string, clips: Set<string>) {
+	if (!presentation.has(key) || value === '') { throw new DrawingError('不支持的样式'); }
+	if (value === 'inherit') { return; }
+	if (key === 'fill' || key === 'color' || key === 'stroke') {
+		if (value === 'currentColor' && key !== 'stroke') { return; }
+		const parsed = color(value);
+		if (key === 'stroke' && parsed !== null) { throw new DrawingError('原生 Badge 不支持描边'); }
+		if (key === 'color' && parsed === null) { throw new DrawingError('color 需要不透明纯色'); }
+	} else if (key === 'fill-rule') {
+		if (value !== 'nonzero') { throw new DrawingError('仅支持 nonzero 填充'); }
+	} else if (key === 'display') {
+		if (value !== 'none' && value !== 'inline') { throw new DrawingError('不支持的 display'); }
+	} else if (key === 'visibility') {
+		if (![ 'hidden', 'collapse', 'visible' ].includes(value)) { throw new DrawingError('不支持的 visibility'); }
+	} else if (key === 'clip-path') {
+		const match = /^url\(\s*#([a-zA-Z0-9_-]+)\s*\)$/.exec(value);
+		if (value !== 'none' && (!match || !clips.has(match[1]!))) {
+			throw new DrawingError('仅支持原版 Badge 圆形裁切');
+		}
+	} else {
+		const opacity = value.endsWith('%') ? scalar(value.slice(0, -1), 0, 100) / 100 : scalar(value, 0, 1);
+		if (opacity !== 0 && opacity !== 1) { throw new DrawingError('原生 Badge 不支持半透明'); }
+	}
+}
+
+function appearance(element: Element, inherited: Style, clips: Set<string>, filter: Filter): Style {
 	const declarations = new Map<string, string>();
 	for (const name of presentation) {
 		const value = element.getAttribute(name);
-		if (value !== null) { declarations.set(name, value.trim()); }
+		if (value === null) { continue; }
+		try {
+			checkPresentation(name, value.trim(), clips);
+			declarations.set(name, value.trim());
+		} catch (error) {
+			if (!(error instanceof DrawingError)) { throw error; }
+			element.removeAttribute(name);
+			filter(`attr <${element.localName}>.${name}`, error.message);
+		}
 	}
+	const styles = new Map<string, string>();
 	for (const declaration of (element.getAttribute('style') ?? '').split(';')) {
 		if (declaration.trim() === '') { continue; }
 		const split = declaration.indexOf(':');
 		const key = declaration.slice(0, split).trim().toLowerCase();
 		const value = declaration.slice(split + 1).trim();
-		if (split === -1 || !presentation.has(key) || value === '') {
-			// Stroke layout has no effect when the stroke itself is absent.
-			if (split !== -1 && [ 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'stroke-miterlimit', 'stroke-dasharray', 'stroke-dashoffset' ].includes(key)) { continue; }
-			throw new DrawingError(`不支持 SVG 样式 ${key || declaration}，请先转换为纯色填充路径`);
+		try {
+			if (split === -1) { throw new DrawingError('样式声明格式不合法'); }
+			checkPresentation(key, value, clips);
+			styles.set(key, value);
+		} catch (error) {
+			if (!(error instanceof DrawingError)) { throw error; }
+			filter(`attr <${element.localName}>.style.${split === -1 ? '(invalid)' : key || '(empty)'}`, error.message);
 		}
-		declarations.set(key, value);
 	}
+	if (element.hasAttribute('style')) {
+		if (styles.size) { element.setAttribute('style', [ ...styles ].map(([ key, value ]) => `${key}:${value}`).join(';')); }
+		else { element.removeAttribute('style'); }
+	}
+	for (const [ key, value ] of styles) { declarations.set(key, value); }
 	const state = { ...inherited };
 	for (const [ key, value ] of declarations) {
 		if (value === 'inherit') { continue; }
-		if (key === 'fill' || key === 'color' || key === 'stroke') { state[key] = value; }
+		if (key === 'fill' || key === 'color' || key === 'stroke') {
+			state[key] = key === 'color' && value === 'currentColor' ? inherited.color : value;
+		}
 		else if (key === 'fill-rule') { state.rule = value; }
 		else if (key === 'display') {
 			if (value === 'none') { state.hidden = true; }
-			else if (value !== 'inline') { throw new DrawingError('不支持该 SVG display 样式'); }
 		} else if (key === 'visibility') {
 			if (value === 'hidden' || value === 'collapse') { state.visible = false; }
 			else if (value === 'visible') { state.visible = true; }
-			else { throw new DrawingError('不支持该 SVG visibility 样式'); }
-		} else if (key === 'clip-path') {
-			const match = /^url\(\s*#([a-zA-Z0-9_-]+)\s*\)$/.exec(value);
-			if (value !== 'none' && (!match || !clips.has(match[1]!))) {
-				throw new DrawingError('仅兼容原版 Badge 的圆形裁切；其他 clipPath 请先转换为路径');
-			}
-		} else {
+		} else if (key !== 'clip-path') {
 			const opacity = value.endsWith('%') ? scalar(value.slice(0, -1), 0, 100) / 100 : scalar(value, 0, 1);
-			if (opacity !== 0 && opacity !== 1) { throw new DrawingError('原生 Badge 不支持半透明，请先转为不透明纯色'); }
 			if (key === 'fill-opacity') { state.fillOpacity = opacity; }
 			else if (key === 'opacity' && opacity === 0) { state.hidden = true; }
 		}
 	}
-	if (state.rule !== 'nonzero') { throw new DrawingError('暂不支持 evenodd 填充，请先转换为 nonzero 路径'); }
 	return state;
 }
 
-function validateAttributes(element: Element) {
-	const allowed = Object.hasOwn(attributes, element.localName) ? attributes[element.localName] : undefined;
-	if (allowed === undefined) { throw new DrawingError(`不支持 SVG 元素 <${element.localName}>，请先转换为路径`); }
-	for (const attribute of element.attributes) {
+function filterAttributes(element: Element, filter: Filter) {
+	const allowed = attributes[element.localName]!;
+	for (const attribute of [ ...element.attributes ]) {
 		if (attribute.namespaceURI === 'http://www.w3.org/2000/xmlns/' || attribute.name === 'xmlns') { continue; }
-		// Editor metadata is never copied into the output. Links and event handlers were rejected
-		// globally, including namespaced forms, before this allowlist is consulted.
-		if (attribute.namespaceURI !== null) {
-			if (attribute.namespaceURI === 'http://www.w3.org/XML/1998/namespace' && ![ 'lang', 'space' ].includes(attribute.localName)) {
-				throw new DrawingError('不支持该 SVG XML 属性');
+		try {
+			const name = attribute.localName.toLowerCase();
+			if (name.startsWith('on') || name === 'href' || name === 'src') {
+				throw new DrawingError('事件处理器、链接和外部资源不进入头像');
 			}
-			continue;
-		}
-		if (!common.has(attribute.name) && !allowed.includes(attribute.name) &&
-			!attribute.name.startsWith('data-') && !attribute.name.startsWith('aria-')) {
-			throw new DrawingError(`不支持 SVG 属性 ${attribute.name}，请先转换为纯色路径`);
+			if (attribute.namespaceURI !== null) { throw new DrawingError('命名空间属性不进入头像'); }
+			if (!common.has(attribute.name) && !allowed.includes(attribute.name) &&
+				!attribute.name.startsWith('data-') && !attribute.name.startsWith('aria-')) {
+				throw new DrawingError('不支持的属性');
+			}
+			const value = attribute.value;
+			if (attribute.name === 'transform') {
+				if (!parseTransform(value).every(Number.isFinite)) { throw new DrawingError('变换矩阵不是有限数值'); }
+			}
+			else if (attribute.name === 'd' && value.trim() !== '') { parsePath(value); }
+			else if (attribute.name === 'points' && value.trim() !== '') { parsePath(`M ${value} Z`); }
+			else if ([ 'x', 'y', 'cx', 'cy', 'r', 'rx', 'ry', 'width', 'height', 'pathLength' ].includes(attribute.name)) {
+				const min = [ 'r', 'rx', 'ry', 'width', 'height', 'pathLength' ].includes(attribute.name) ? 0 : -1000000;
+				scalar(value, element.localName === 'svg' && [ 'width', 'height' ].includes(attribute.name) ? 0.001 : min, 1000000, true);
+			} else if (attribute.name === 'viewBox') {
+				const view = value.trim().split(/[\s,]+/).map(value => scalar(value));
+				if (view.length !== 4 || view[2]! <= 0 || view[3]! <= 0) { throw new DrawingError('viewBox 需要四个数字和正数宽高'); }
+			} else if (attribute.name === 'preserveAspectRatio') {
+				if (![ 'none', 'xMidYMid', 'xMidYMid meet' ].includes(value.trim())) { throw new DrawingError('不支持的宽高比对齐方式，使用默认等比居中'); }
+			} else if ((attribute.name.startsWith('stroke-') && !presentation.has(attribute.name)) || attribute.name === 'vector-effect') {
+				throw new DrawingError('描边布局不进入头像');
+			}
+		} catch (error) {
+			if (!(error instanceof DrawingError) && !(error instanceof SvgPathError)) { throw error; }
+			element.removeAttributeNode(attribute);
+			filter(`attr <${element.localName}>.${attribute.name}`, error.message);
 		}
 	}
 }
@@ -231,30 +291,42 @@ function importedShape(path: PathCommand[], layer: 1 | 2): Shape {
 /** Parse in an inert XML document; never attach imported nodes, attributes or markup to the page.
  * Only the resulting numeric paths reach the shared compiler and existing authenticated save API. */
 export function importSvg(source: string, limits: Limits = defaultLimits,
-	fallbackColors: Drawing['colors'] = [ '#15232e', '#55d6be', '#f5d58a' ]): Drawing {
+	fallbackColors: Drawing['colors'] = [ '#ffffff', '#000000', '#000000' ],
+	report: SvgImportReport = { filtered: [], notes: [] }): Drawing {
+	const filter: Filter = (item, reason) => {
+		const message = `${item}：${reason}`;
+		if (!report.filtered.includes(message)) { report.filtered.push(message); }
+	};
 	try {
 		if (new TextEncoder().encode(source).byteLength > maxRequestBytes) { throw new DrawingError('SVG 文件不能超过 64 KiB'); }
 		const xml = source.replace(/^\uFEFF/, '').replace(/^\s*<\?xml\s[^?]*\?>/, '');
 		if (/<!DOCTYPE|<!ENTITY|<\?/i.test(xml)) { throw new DrawingError('不允许 SVG DTD、实体声明或处理指令'); }
-		// Reject resource/event attribute syntax before even creating the inert XML document.
-		if (/[\s:](?:href|src|on[a-z]+)\s*=/i.test(xml)) { throw new DrawingError('SVG 不允许事件处理器、链接或外部资源'); }
+		// This is an inert XML document, not an HTML/SVG insertion. No imported node is ever
+		// adopted into the live document, including nodes that will be removed by the allowlist.
 		const document = new DOMParser().parseFromString(xml, 'image/svg+xml');
 		const root = document.documentElement;
 		if (document.getElementsByTagName('parsererror').length || root.localName !== 'svg' || root.namespaceURI !== namespace) {
 			throw new DrawingError('文件不是有效的 SVG；请包含标准 SVG xmlns 和正确的 XML 结构');
 		}
-		if ((root.getAttribute('transform') ?? '').trim() !== '') {
-			throw new DrawingError('请将 SVG 根节点的 transform 移到内部 g 分组后再导入');
-		}
-		const elements = Array.from(document.getElementsByTagName('*'));
-		if (elements.length > 512) { throw new DrawingError('SVG 元素过多，请简化后再导入'); }
-		for (const element of elements) {
-			if (forbidden.has(element.localName.toLowerCase())) { throw new DrawingError(`SVG 不允许 <${element.localName}>，请使用纯色填充路径`); }
-			for (const attribute of element.attributes) {
-				const name = attribute.localName.toLowerCase();
-				if (name.startsWith('on') || name === 'href' || name === 'src') { throw new DrawingError('SVG 不允许事件处理器、链接或外部资源'); }
+		if (document.getElementsByTagName('*').length > 512) { throw new DrawingError('SVG 元素过多，请简化后再导入'); }
+		const remove = (element: Element, reason: string) => {
+			filter(`element <${element.localName}>`, reason);
+			// Drop the entire subtree. Never unwrap scripts, foreign documents, or unsupported
+			// containers into visible artwork.
+			element.remove();
+		};
+		const sanitize = (element: Element, depth: number) => {
+			if (depth > 32) { throw new DrawingError('SVG 嵌套过深'); }
+			if (forbidden.has(element.localName.toLowerCase()) || element.namespaceURI !== namespace ||
+				!Object.hasOwn(attributes, element.localName) || (element.localName === 'svg' && element !== root)) {
+				remove(element, '不支持或不安全的元素及其子树已忽略');
+				return;
 			}
-		}
+			filterAttributes(element, filter);
+			for (const child of [ ...element.children ]) { sanitize(child, depth + 1); }
+		};
+		sanitize(root, 0);
+		const elements = Array.from(document.getElementsByTagName('*'));
 		let view: number[];
 		const viewBox = root.getAttribute('viewBox');
 		if (viewBox !== null) {
@@ -276,7 +348,6 @@ export function importSvg(source: string, limits: Limits = defaultLimits,
 			(100 - view[3]! * scaleY) / 2 - view[1]! * scaleY ];
 		const clips = new Set<string>();
 		for (const element of elements.filter(element => element.localName === 'clipPath')) {
-			validateAttributes(element);
 			const circle = element.children[0];
 			const clipId = element.getAttribute('id');
 			if (!clipId || !/^[a-zA-Z0-9_-]+$/.test(clipId) || element.children.length !== 1 || circle?.localName !== 'circle' ||
@@ -286,69 +357,89 @@ export function importSvg(source: string, limits: Limits = defaultLimits,
 				(element.getAttribute('clipPathUnits') ?? 'userSpaceOnUse') !== 'userSpaceOnUse' ||
 				scalar(circle.getAttribute('cx') ?? '0') !== 50 || scalar(circle.getAttribute('cy') ?? '0') !== 50 ||
 				scalar(circle.getAttribute('r') ?? '0') !== 52) {
-				throw new DrawingError('仅兼容原版 Badge 的默认圆形 clipPath；其他裁切请先转换为路径');
+				remove(element, '仅兼容原版 Badge 的默认圆形 clipPath，其他裁切已忽略');
+				continue;
 			}
-			validateAttributes(circle);
 			// No styles/presentation may alter a supposedly native clipping circle.
 			if (circle.hasAttribute('style') || element.hasAttribute('style') ||
 				[ ...presentation ].some(name => circle.hasAttribute(name) || element.hasAttribute(name))) {
-				throw new DrawingError('圆形 clipPath 不能携带额外样式');
+				remove(element, '圆形 clipPath 带有额外样式，裁切已忽略');
+				continue;
 			}
 			clips.add(clipId);
 		}
-		const records: { color: string; path: PathCommand[]; background: boolean }[] = [];
+		for (const element of elements.filter(element => element.localName === 'defs')) {
+			for (const child of [ ...element.children ]) {
+				if (child.localName !== 'clipPath' || !clips.has(child.getAttribute('id') ?? '')) {
+					remove(child, 'defs 中仅保留原版圆形裁切定义');
+				}
+			}
+		}
+		// Validate presentation on every surviving element, including hidden artwork, so all
+		// filtered attributes are reported rather than silently bypassed by display="none".
+		for (const element of Array.from(document.getElementsByTagName('*'))) {
+			appearance(element, {
+				fill: '#000000', color: '#000000', stroke: 'none', rule: 'nonzero',
+				hidden: false, visible: true, fillOpacity: 1,
+			}, clips, filter);
+		}
+		const records: { color: string; path: PathCommand[]; background: boolean; element: string }[] = [];
 		const walk = (element: Element, parent: Matrix, inherited: Style, depth: number) => {
 			if (depth > 32) { throw new DrawingError('SVG 嵌套过深'); }
-			if ([ 'title', 'desc', 'metadata' ].includes(element.localName)) { return; }
-			if (element.namespaceURI !== namespace || (element.localName === 'svg' && element !== root)) {
-				throw new DrawingError('不支持嵌套 SVG 或其他文档命名空间');
-			}
-			validateAttributes(element);
-			if (element.localName === 'defs') {
-				for (const child of element.children) {
-					if (child.localName !== 'clipPath' || !clips.has(child.getAttribute('id') ?? '')) {
-						throw new DrawingError('SVG defs 仅允许原版圆形裁切；请展开引用并移除其他定义');
-					}
-				}
+			if (element.localName === 'defs' || element.localName === 'clipPath') { return; }
+			const state = appearance(element, inherited, clips, filter);
+			const matrix = multiply(parent, parseTransform(element.getAttribute('transform') ?? ''));
+			if (!matrix.every(Number.isFinite)) {
+				remove(element, '变换合成结果不是有限数值，元素及其子树已忽略');
 				return;
 			}
-			if (element.localName === 'clipPath') { throw new DrawingError('clipPath 只能位于 defs 内'); }
-			const state = appearance(element, inherited, clips);
-			const matrix = multiply(parent, parseTransform(element.getAttribute('transform') ?? ''));
 			if (state.hidden) { return; }
 			if (element.localName === 'svg' || element.localName === 'g') {
-				for (const child of element.children) { walk(child, matrix, state, depth + 1); }
+				for (const child of [ ...element.children ]) { walk(child, matrix, state, depth + 1); }
 				return;
 			}
-			if (element.children.length !== 0) { throw new DrawingError('图形中不能嵌入其他 SVG 元素'); }
+			for (const child of [ ...element.children ]) { remove(child, '图形内部的嵌套元素已忽略'); }
 			if (!state.visible || state.fillOpacity === 0) { return; }
-			if (color(state.stroke === 'currentColor' ? state.color : state.stroke) !== null) {
-				throw new DrawingError('原生 Badge 不支持描边，请在绘图软件中将描边转换为填充路径');
-			}
 			const fill = color(state.fill === 'currentColor' ? state.color : state.fill);
 			if (fill === null) { return; }
-			const commands = geometry(element);
-			if (commands.length === 0) { return; }
+			let commands: PathCommand[];
+			try { commands = geometry(element); } catch (error) {
+				if (!(error instanceof DrawingError) && !(error instanceof SvgPathError)) { throw error; }
+				remove(element, `几何参数无法生成有效路径：${error.message}`);
+				return;
+			}
+			if (commands.length === 0) {
+				filter(`element <${element.localName}>`, '缺少有效几何或尺寸为零，未生成图案');
+				return;
+			}
 			const original = mapPath(commands, matrix);
+			if (!original.every(command => command.points.every(point => Number.isFinite(point.x) && Number.isFinite(point.y)))) {
+				remove(element, '变换后的路径坐标不是有限数值');
+				return;
+			}
 			const corners = original.flatMap(command => command.points);
 			const background = element.localName === 'rect' && !element.hasAttribute('rx') && !element.hasAttribute('ry') &&
 				corners.length === 4 && corners.every(point =>
 					(Math.abs(point.x - view[0]!) < 0.000001 || Math.abs(point.x - view[0]! - view[2]!) < 0.000001) &&
 					(Math.abs(point.y - view[1]!) < 0.000001 || Math.abs(point.y - view[1]! - view[3]!) < 0.000001)) &&
 				new Set(corners.map(point => `${point.x},${point.y}`)).size === 4;
-			records.push({ color: fill, path: positiveWinding(mapPath(original, viewport)), background });
+			records.push({ color: fill, path: positiveWinding(mapPath(original, viewport)), background, element: element.localName });
 		};
 		walk(root, identity, {
 			fill: '#000000', color: '#000000', stroke: 'none', rule: 'nonzero',
 			hidden: false, visible: true, fillOpacity: 1,
 		}, 0);
 		const colors: Drawing['colors'] = [ ...fallbackColors ];
-		const hasBackground = records[0]?.background === true;
-		if (hasBackground) { colors[0] = records.shift()!.color; }
+		const bottom = records.shift();
+		if (!bottom) { throw new DrawingError('过滤后 SVG 中没有可导入的可见填充图案'); }
+		colors[0] = bottom.color;
+		if (!bottom.background) {
+			report.notes.push(`最底层 <${bottom.element}> 的填色 ${bottom.color} 将用作背景色并铺满头像；原来的轮廓和透明区域可能改变，请确认预览。`);
+		}
 		const palette: string[] = [];
 		const layers: PathCommand[][] = [ [], [] ];
 		let previous = 0;
-		let commands = 0;
+		let commands = bottom.path.length;
 		for (const record of records) {
 			let index = palette.indexOf(record.color);
 			if (index === -1) { index = palette.length; palette.push(record.color); }
@@ -363,7 +454,6 @@ export function importSvg(source: string, limits: Limits = defaultLimits,
 		}
 		for (let index = 0; index < palette.length; ++index) { colors[index + 1] = palette[index]!; }
 		const shapes = layers.flatMap((path, index) => path.length ? [ importedShape(path, index === 0 ? 1 : 2) ] : []);
-		if (shapes.length === 0 && !hasBackground) { throw new DrawingError('SVG 中没有可导入的图案'); }
 		const compiled = compileDrawing({ schemaVersion: 1, source: 'svg', colors, shapes }, limits).drawing;
 		// Keep enough room for version/publish and the enclosing JSON object in the existing API.
 		if (new TextEncoder().encode(JSON.stringify(compiled)).byteLength > maxRequestBytes - 256) {
