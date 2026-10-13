@@ -166,7 +166,7 @@ hooks.register('version', serverData => {
 				href: '/speedrun',
 				id: 'menu-item-speedrun',
 				label: 'Speedrun',
-				svg: 'leaderboard',
+				svg: 'score',
 				target: '_blank',
 			},
 		} ],

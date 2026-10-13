@@ -178,7 +178,7 @@ hooks.register('version', data => {
 			menuData: [ {
 				section: 0, after: 'World',
 				item: {
-					id: 'menu-item-custom-badge', label: 'Badge Studio', svg: 'inventory', target: '_blank',
+					id: 'menu-item-custom-badge', label: 'Badge Studio', svg: 'arena', target: '_blank',
 					href: `${(config.backend.assetBaseUrl ?? '').replace(/\/$/, '')}/custom-badge/`,
 				},
 			} ],
