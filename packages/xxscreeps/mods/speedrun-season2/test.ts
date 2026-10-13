@@ -22,6 +22,7 @@ import './invader-test.js';
 import './global-rules-test.js';
 import './lifecycle-test.js';
 import './score-test.js';
+import './respawn-test.js';
 
 const season1Mod = 'xxscreeps/mods/speedrun';
 const season2Mod = 'xxscreeps/mods/speedrun-season2';
