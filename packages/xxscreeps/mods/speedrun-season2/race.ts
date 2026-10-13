@@ -12,7 +12,7 @@ const race = createSeasonRace({
 export type { LeaderboardEntry, PlayerRecord, RaceRecord } from 'xxscreeps/mods/speedrun/race-core.js';
 export { controlPointsOf, runIdOf } from 'xxscreeps/mods/speedrun/race-core.js';
 
-// Step 9 adds scoring and storage readers only; no respawn, cleanup, HTTP API or page hook.
+// Scoring/storage adapter. Manual cleanup is separate; no automatic reset, HTTP API or page hook here.
 export const {
 	dueRunsKey, racingKey, runKey, scoreKey, rankKey, bestKey, playerRunsKey, playerBracketsKey,
 	raceBrackets, startRun, stopRun, captureBracket, captureDueBrackets,

@@ -2,6 +2,8 @@
 
 日期：2026-10-13。用户确认第 8 步“通过 下一步”，本轮只实现第 9 步，自动测试后等待本步验收。**不接入赛季 2 自动重开、全区清场、排行榜 HTTP API 或页面。**
 
+后续验收记录：用户确认“前面通过, 继续下一步”，第 9 步已通过。本文保留第 9 步交付时的范围；当前手动清场及中央九房 Extractor 保留规则见 [STEP10.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP10.md)，自动重开仍未接入。
+
 ## 本步规则
 
 - 新增赛季 2 `main` provider，仅在房间处理完成后的 shard tick 消费 `speedrun-season2/due`；没有地图 initializer，也不调用自动 respawn。

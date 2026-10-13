@@ -4,7 +4,7 @@
 
 在同一 shard 上保留赛季 1，按功能逐步开发、部署和验收赛季 2。详细规则见 [README.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/README.md)。
 
-**当前进度：第 0～8 步已由用户确认通过；第 9 步独立计分与存储已实现，专项及基线回归完成，等待用户验收；未接入自动重开、清场或排行榜 API/页面。**
+**当前进度：第 0～9 步已由用户确认通过；第 10 步手动 respawn 全区清场已实现，中央九房已建成 Extractor 保留，等待用户验收；未接入自动重开或排行榜 API/页面。**
 
 ## 执行和验收规则
 
@@ -26,7 +26,7 @@
 - 新区块中央九房不关闭、不封墙，正常运行。按追加要求，仅将外围普通房间朝封闭 highway 的整条边界封为地形墙；内部连接不封，不增加额外跨区 intent 检查。约定的四条 highway 保持关闭，不改造其地形。
 - Invader 按所属区块和各自配置控制；**claim 与 Ruin 按最新要求全图生效，统一读取 `speedrun.claimController`、`speedrun.ruins`，不设独立配置。**
 - **deposit 和 power bank 继续由 `speedrun.deposits`、`speedrun.powerBanks` 全图控制**，赛季 2 不新增对应开关，不删除已有资源。
-- 玩家 respawn 保持全局退出；赛季 1 额外建筑清理保持原有语义；赛季 2 清理新区块全部人造建筑及施工点，不按 owner 或 presence 过滤。
+- 玩家 respawn 保持全局退出；赛季 1 额外建筑清理保持原有语义；赛季 2 清理新区块人造建筑及施工点，不按 owner 或 presence 过滤，**中央九房 E4N4～E6N6 的已建成 Extractor 除外**。Extractor 施工点和非中央房间 Extractor 仍清理。
 - 赛季 2 配置前缀为 `speedrunSeason2`，完整比赛存储前缀为 `speedrun-season2/*`；不混读、混写旧成绩。
 - 旧赛季地图、建筑、进行中的比赛及历史成绩不因新 mod 初始化而重置。
 
@@ -156,22 +156,30 @@
 - [x] 自动测试：新旧表互不写入、榜单互不读取；局数和最好成绩不借用旧数据。
 - [x] 自动测试：RCL 不足、失去房间、重复任务、历史记录、并列排名和分页。
 - [x] 交付：短档位计分测试、停服等级夹具及只读存储/排名检查，见 [STEP9.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP9.md)；不提前开放新 API/页面。
-- [ ] 用户验收通过。
+- [x] 用户验收通过。
 
 自动测试：新计分 27/27、生命周期 22/22、既有赛季 2 专项 152/152；旧赛季与公共比赛在仅旧 mod、双 mod 下各 99/99。默认完整 667/667；仅旧 mod 744/765、双 mod 945/966，保留与第 8 步同名同序的 21 项既有失败，无新增失败，不能标记完整混跑全部通过。首次地图/封墙专项的 4 项 CLI 超时后续在完整回归及串行独立复核通过，未改代码或时限，日志保留于本步验收文档。TypeScript、相关严格 ESLint 和 diff 空白检查通过；文档夹具及只读命令已在临时存档实测。
 
-新增 main 仅采集新赛季成绩，不初始化地图，不清场、不自动 respawn。无新增配置；正常构建并完整重启后测试新局，无需成绩迁移。旧赛季 core 只增加默认 false 的可选快照防重放，新赛季开启，旧语义不变。本步等待用户确认，未开始第 10 步。
+第 9 步新增 main 仅采集新赛季成绩，不初始化地图，不清场、不自动 respawn。无新增配置；正常构建并完整重启后测试新局，无需成绩迁移。旧赛季 core 只增加默认 false 的可选快照防重放，新赛季开启，旧语义不变。用户确认：“前面通过, 继续下一步”，第 9 步验收通过，授权开始第 10 步。
 
 ## 第 10 步 手动 respawn 全区清场
 
-- [ ] 保留玩家全房间退出，赛季 2 额外清理新区块所有人造建筑和施工点。
-- [ ] 使用明确类型分类和房间 processor/internal intent，覆盖无 presence 和休眠房间。
-- [ ] 保留地形及自然对象；清场不留下可继承的 Ruin；清场完成前禁止下一次落地。
-- [ ] 自动测试：多房间、不同 owner、无主建筑、施工点、Extractor、无 presence 和休眠房间均被处理。
-- [ ] 自动测试：Source、Mineral、Controller、Keeper Lair 等原生对象保留；旧区块不被赛季 2 清场。
-- [ ] 自动测试：清场任务重复执行或跨重启不误删下一局建筑；Ruin 配置开启时也不留下清场废墟。
-- [ ] 交付：测试副本造建筑、手动 respawn、检查 81 房及重新落地的操作。
+- [x] 保留玩家全房间退出，赛季 2 额外清理新区块人造建筑和施工点；中央九房已建成 Extractor 保留。
+- [x] 使用明确类型分类和房间 processor/internal intent，覆盖无 presence 和休眠房间。
+- [x] 保留地形及自然对象；清场不留下可继承的 Ruin；清场完成前禁止下一次落地。
+- [x] 自动测试：多房间、不同 owner、无主建筑、施工点、非中央 Extractor 清理及中央九房 Extractor 保留。
+- [x] 自动测试：Source、Mineral、Controller、Keeper Lair 等原生对象保留；旧区块不被赛季 2 清场。
+- [x] 自动测试：清场任务重复执行或跨重启不误删下一局建筑；Ruin 配置开启时也不留下清场废墟。
+- [x] 交付：测试副本造建筑、手动 respawn、检查 81 房及重新落地的操作，见 [STEP10.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP10.md)。
 - [ ] 用户验收通过。
+
+复用已存在的独立 `speedrunSeason2.respawnCleanup`，默认 true；不新增配置字段。任务持久化在 shard 的 `speedrun-season2/cleanup`，请求后的 tick 核验全部目标房间的当前存档后才放行下一局；不依赖引擎保存 hook 或 ack 表。重复请求和旧 intent 不会清掉新局。全局退出及 flags 行为保留。**用户追加要求：“不包括中央九房的Extractor”。本步等待用户验收，不开始第 11 步。**
+
+首次交付回归：清场专项 17/17、落地专项 25/25；默认完整 681/681；仅旧 mod 762/783、双 mod 980/1001，均保留地形修复后基线同名同序的 21 项既有失败。文档夹具与只读命令在独立临时存档实测，确认 81 房清理、九个原版 Extractor 与自然对象 ID 保留、地形及旧房间不变，未操作线上数据。
+
+2026-10-13 用户要求“保留一个文件的方式”：本步公共改动仅保留 `classic/spawn/model.ts` 的 respawn 扩展入口，撤回 `classic/spawn/backend.ts`、`engine/processor/room.ts`、`engine/processor/symbols.ts`；其余实现收回新 mod。补充未保存/下一份 buffer 不提前解锁及持久化残留阻挡测试，保留原版认证、载荷 coercion、单人落地、重试和 Extractor 例外。此次收窄的最终回归结果见 STEP10，不把上一版结果当成本版验收。
+
+单公共文件方案最终复测：清场 19/19、落地 25/25；默认完整 681/681；仅旧 mod 762/783、双 mod 982/1003，均保留同名同序的 21 项既有失败，无新增失败；全部 220 项赛季 2 专项通过。TypeScript、严格 ESLint、diff 空白检查、文档夹具/只读命令与完整存档对照通过。确认三个撤回文件与 HEAD 内容一致；本轮不改已有暂存内容，提交前需重新暂存本轮修改。用户验收仍待确认，不开始第 11 步。
 
 ## 第 11 步 到期自动重开
 

@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～8 步已由用户验收通过。第 9 步已实现独立计分、成绩索引及排名/历史存储读取，专项及基线回归已完成，等待用户验收。新 mod 注册 `backend`、`config`、`main`、`processor`、`test` provider；main 只采集新赛季档位成绩，地图和补墙仍是显式 CLI，不在启动时拍图。**赛季 2 自动重开、全区清场、排行榜 HTTP API 和页面尚未接入；中间步骤只在测试副本验收，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～9 步已由用户验收通过。第 10 步接入手动 respawn 全区清场，中央九房已建成 Extractor 保留，等待用户验收。新 mod 注册 `backend`、`config`、`main`、`processor`、`test` provider；main 采集新赛季档位成绩并恢复已请求的清场，地图和补墙仍是显式 CLI，不在启动时拍图。**赛季 2 自动重开、排行榜 HTTP API 和页面尚未接入；中间步骤只在测试副本验收，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 9 步操作见 [STEP9.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP9.md)，本轮不提前开始第 10 步。
+逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 10 步操作见 [STEP10.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP10.md)，本轮不提前开始第 11 步。
 
 ## 赛季范围和规则
 
@@ -21,7 +21,7 @@
 | claimController | `speedrun.claimController` 全图控制 | 共用同一个全图开关 |
 | Ruin | `speedrun.ruins` 全图控制 | 共用同一个全图开关 |
 | 玩家 respawn | 清掉该玩家全部房间的对象并释放控制器 | 同样清掉该玩家全部房间 |
-| respawn 地图清场 | 保持现有清理规则 | 清掉新区块内所有人造建筑 |
+| respawn 地图清场 | 保持现有清理规则 | 清掉新区块人造建筑和施工点，保留中央九房已建成 Extractor |
 | 比赛状态与成绩 | 保留 `speedrun/*` | 使用 `speedrun-season2/*` |
 | 排行榜页面 | `/speedrun` | `/speedrun-season2` |
 
@@ -114,7 +114,7 @@ speedrunSeason2:
 
 赛季 2 的独立设置由自己的 defaults 定义，不能在运行时回退读取 `config.speedrun`。例如，只修改 `speedrun.invaders`，不能影响新区块；只修改 `speedrunSeason2.invaders`，不能影响旧区块。claim、Ruin 和两个资源开关不是独立设置，只在 `speedrun` 下定义。
 
-两个配置中的 `respawnCleanup` 使用各自赛季的清场实现：旧赛季保持原有语义，新赛季清理整个新区块的人造建筑。赛季 2 不继承旧赛季中央九房和统一地形规则。
+两个配置中的 `respawnCleanup` 使用各自赛季的清场实现：旧赛季保持原有语义，新赛季清理整个新区块的人造建筑，保留中央九房已建成 Extractor。赛季 2 不继承旧赛季中央九房和统一地形规则。
 
 claim 继续只由旧 mod 的 driver/game 传入和读取唯一全图开关，不新增赛季 2 payload 或游戏 API 包装。已使用旧版示例的部署必须删除 `speedrunSeason2.claimController` 和 `speedrunSeason2.ruins`，否则 schema 会拒绝启动。
 
@@ -154,7 +154,7 @@ API 层与实际 `placeSpawn` processor 共用赛季范围和落地限制：
 
 第 8 步已实现上述独立开局及双向切换。`speedrun/active/<userId>` 是账号级协调元数据，只标记 namespace、shard、run、room、startedTick 和 active，不存成绩；停止后保留 inactive 标记，旧版赛季 1 的无标记活动 run 仍兼容。启动/停止及旧赛季计分/到期任务通过玩家级数据库互斥避免切换交错，旧成绩键名保持不变；这不增加落地人数限制。
 
-初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。第 9 步已消费独立 due 并写入新 score/rank/best/runs/brackets，提供存储级排名与历史读取；赛季 2 快照按局/档位防重放，旧赛季默认行为不变。尚不自动重开或全区清场，也没有新 HTTP API/页面，后续分步接入。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
+初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。第 9 步已消费独立 due 并写入新 score/rank/best/runs/brackets，提供存储级排名与历史读取；赛季 2 快照按局/档位防重放，旧赛季默认行为不变。第 10 步只接入手动 respawn 清场；尚不自动重开，也没有新 HTTP API/页面，后续分步接入。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
 
 ## Respawn 和赛季 2 全区清场
 
@@ -163,12 +163,12 @@ API 层与实际 `placeSpawn` processor 共用赛季范围和落地限制：
 地图清场则按触发本次退出的赛季执行：
 
 - 赛季 1 沿用原有建筑清理范围和规则。
-- 赛季 2 在手动 respawn 或到期自动 respawn 时，清理 `E1N1～E9N9` 全部 81 房的人造建筑，不限于 `E3N3`，也不限于玩家的 presence 房间。
+- 赛季 2 清理 `E1N1～E9N9` 全部 81 房的人造建筑，不限于 `E3N3`，也不限于玩家的 presence 房间。第 10 步仅接入手动 respawn；第 11 步再接入到期自动 respawn。
 - 赛季 2 清场不按建筑 owner 过滤，无主的 Road、Container、Wall 以及其他玩家留下的人造建筑同样清掉。
 - 人造建筑的 Construction Site 一并清理，避免下一局继承施工残留。
 - Source、Mineral、Controller、Keeper Lair 等原生对象保留；地形不重新生成，不恢复为旧赛季统一地形。
 
-人造建筑清理应使用明确的建筑类型分类，不能简单删除所有带 `hits` 的对象或所有 `Structure`。Extractor 属于人造建筑；原版预置 Extractor 也按该分类清理。Portal、Power Bank 等世界对象不按玩家建筑处理。
+人造建筑清理使用明确的建筑类型分类，不能简单删除所有带 `hits` 的对象或所有 `Structure`。按最新追加要求，**中央九房 `E4N4～E6N6` 的已建成 Extractor 不清理**；其他房间的 Extractor 和所有房间的 Extractor 施工点仍清理。保留的中央 Extractor 若属于退出玩家，将其归属置为无主，避免整体退出将其删除或留下该玩家 presence。Portal、Power Bank 等世界对象不按玩家建筑处理。
 
 最终计分与清理的顺序为：
 
@@ -181,6 +181,10 @@ API 层与实际 `placeSpawn` processor 共用赛季范围和落地限制：
 ```
 
 建筑清理不能因普通摧毁生成可继承的 Ruin 而留下本局建筑资源。清理通过正常房间 processor 和内部 intent 完成，覆盖没有玩家 presence、已休眠的房间，不在线直接写房间 blob。确认清场完成后再允许下一局落地，旧清理任务不得继续清掉新局建筑。
+
+第 10 步将清场 generation、目标房间和任务状态写入 shard 持久化数据。重复 respawn 复用未完成 generation；重启或 scratch 队列丢失后由 main 续投；仅在请求后的 tick 核对所有目标的已保存当前 room buffer，确认清洁后解锁，不依据内存修改或尚未生效的下一份 buffer。清场期间禁止新区块落地，也禁止退出玩家提前切到旧赛季；其他旧赛季玩家不受此门禁影响。这是清场安全门禁，不是额外的比赛人数或排队机制。
+
+按用户要求，第 10 步新 mod 以外仅保留 [classic/spawn/model.ts](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/classic/spawn/model.ts) 的公共 respawn 扩展入口。引擎房间处理器及 classic backend 均恢复原版；完成核验、重试、载荷校验和门禁都在赛季 2 内实现，不新增引擎保存钩子或房间 ack 表。
 
 ## 独立成绩存储和页面
 

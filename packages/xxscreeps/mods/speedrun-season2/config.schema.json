@@ -3,7 +3,7 @@
     "type": "object",
     "properties": {
         "speedrunSeason2": {
-            "description": "Independent settings for E1N1 through E9N9. Initial spawn and periodic Invaders are connected; other rules arrive in subsequent steps. Deposit, power bank, claimController and ruin switches remain global under speedrun.",
+            "description": "Independent settings for E1N1 through E9N9. Initial spawn, Invaders, scoring and manual cleanup are connected; automatic reset arrives later. Deposit, power bank, claimController and ruin switches remain global under speedrun.",
             "type": "object",
             "additionalProperties": false,
             "properties": {
@@ -13,7 +13,7 @@
                     "default": false
                 },
                 "respawnCleanup": {
-                    "description": "Whether season-2 respawn clears all artificial buildings and construction sites in its block. Player respawn itself remains global.",
+                    "description": "Whether season-2 respawn clears artificial buildings and construction sites in its block. Completed Extractors in E4N4 through E6N6 are preserved. Player respawn itself remains global.",
                     "type": "boolean",
                     "default": true
                 },

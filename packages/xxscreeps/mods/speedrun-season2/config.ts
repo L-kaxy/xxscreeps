@@ -1,6 +1,6 @@
 /**
  * Independent season-2 settings for E1N1 through E9N9.
- * Initial spawn is fixed; periodic Invaders are configurable. Other gameplay hooks arrive later.
+ * Initial spawn is fixed; periodic Invaders and manual cleanup are configurable.
  * Deposits, power banks, claiming and ruins remain global switches under `speedrun`.
  */
 export interface SpeedrunSeason2Settings {
@@ -13,6 +13,7 @@ export interface SpeedrunSeason2Settings {
 
 	/**
 	 * Whether season-2 respawn clears all artificial buildings and construction sites in its block.
+	 * Completed Extractors in E4N4 through E6N6 are preserved.
 	 * Player respawn itself still removes the player's objects from all rooms.
 	 * @default true
 	 */
@@ -35,7 +36,7 @@ export interface SpeedrunSeason2Settings {
 export interface SpeedrunSeason2Config {
 	/**
 	 * Independent season-2 settings; global switches exist only under `speedrun`.
-	 * Initial spawn and periodic Invaders are connected; other rules arrive in subsequent steps.
+	 * Initial spawn, Invaders, scoring and manual cleanup are connected; automatic reset arrives later.
 	 */
 	speedrunSeason2?: SpeedrunSeason2Settings;
 }

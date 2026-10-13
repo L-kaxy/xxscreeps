@@ -3,6 +3,14 @@ import { pushIntentsForRoomNextTick, userToPresenceRoomsSetKey } from 'xxscreeps
 import { controlledRoomsKey } from 'xxscreeps/mods/classic/controller/model.js';
 import { saveUserFlagBlobForNextTick } from 'xxscreeps/mods/meta/flag/model.js';
 
+type RespawnInterceptor = (shard: Shard, userId: string, rooms: readonly string[]) => Promise<string[] | undefined>;
+const respawnInterceptors: RespawnInterceptor[] = [];
+
+/** Host-side extensions may replace the queued handover, without replacing the respawn API. */
+export function registerRespawnInterceptor(interceptor: RespawnInterceptor) {
+	respawnInterceptors.push(interceptor);
+}
+
 /**
  * Hand everything a player holds over: one `unspawn` intent per room, queued for the next tick, and
  * their flags cleared. This is the respawn, and this is the only implementation of it -- the
@@ -23,9 +31,18 @@ export async function respawnPlayer(shard: Shard, userId: string, extraRooms: re
 		shard.scratch.sMembers(userToPresenceRoomsSetKey(userId)),
 		shard.scratch.sMembers(controlledRoomsKey(userId)),
 	]);
-	const rooms = [ ...new Set([ ...presence, ...controlled, ...extraRooms ]) ];
+	let rooms = [ ...new Set([ ...presence, ...controlled, ...extraRooms ]) ];
+	let intercepted = false;
+	for (const interceptor of respawnInterceptors) {
+		const result = await interceptor(shard, userId, rooms);
+		if (result !== undefined) {
+			rooms = result;
+			intercepted = true;
+			break;
+		}
+	}
 	await Promise.all([
-		...rooms.map(roomName => pushIntentsForRoomNextTick(shard, roomName, userId, {
+		...intercepted ? [] : rooms.map(roomName => pushIntentsForRoomNextTick(shard, roomName, userId, {
 			local: { unspawn: [ [] ] },
 			internal: true,
 		})),
