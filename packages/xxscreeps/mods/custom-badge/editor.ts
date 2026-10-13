@@ -27,12 +27,7 @@ const storageKey = 'custom-badge.token';
 const logoutKey = 'custom-badge.loggedOut';
 const hardLimits: Limits = { maxShapes: 64, maxPathLength: 131072 };
 
-function storedToken() {
-	try {
-		const token = sessionStorage.getItem(storageKey);
-		if (token !== null && token !== '') { return token; }
-		if (sessionStorage.getItem(logoutKey) !== null) { return ''; }
-	} catch { /* Shared login can still be read if session storage is unavailable. */ }
+function sharedToken() {
 	try {
 		const raw = localStorage.getItem('auth')?.trim() ?? '';
 		let shared: unknown = raw;
@@ -43,8 +38,22 @@ function storedToken() {
 	} catch { return ''; }
 }
 
+function storedToken() {
+	const shared = sharedToken();
+	if (shared) { return shared; }
+	try {
+		const token = sessionStorage.getItem(storageKey);
+		if (token !== null && token !== '') { return token; }
+	} catch { /* Shared login can still be read if session storage is unavailable. */ }
+	// A legacy loggedOut flag must not prevent adopting the current game client's auth.
+	return '';
+}
+
 let token = storedToken();
 let authEpoch = 0;
+let ready = false;
+let lastSharedAttempt = '';
+let sharedRetryAt = 0;
 let profile: Profile | null = null;
 let options: Options = { ...defaultLimits, enabled: false, saveCooldownSeconds: 10, auth: { password: false, steam: false } };
 let drawing = newDrawing();
@@ -81,12 +90,11 @@ function importReport(report: SvgImportReport) {
 function setToken(value: string) {
 	token = value;
 	try {
+		sessionStorage.removeItem(logoutKey);
 		if (value) {
 			sessionStorage.setItem(storageKey, value);
-			sessionStorage.removeItem(logoutKey);
 		} else {
 			sessionStorage.removeItem(storageKey);
-			sessionStorage.setItem(logoutKey, '1');
 		}
 	} catch { /* Private browsing may disable storage; memory-only sessions still work. */ }
 }
@@ -138,7 +146,12 @@ async function operation(task: () => Promise<void>) {
 	if (busy) { return; }
 	busy = true;
 	updateControls();
-	try { await task(); } catch (caught) { error(caught); } finally { busy = false; updateControls(); }
+	try { await task(); } catch (caught) { error(caught); } finally {
+		busy = false;
+		updateControls();
+		// Includes a failed cached-session login: immediately try the latest shared auth.
+		void syncSharedLogin();
+	}
 }
 
 function svgNode<Name extends keyof SVGElementTagNameMap>(name: Name, attrs: Record<string, string | number> = {}) {
@@ -224,9 +237,9 @@ function updateControls() {
 	}
 	notice.hidden = notice.textContent === '';
 	if (!options.auth.password && !options.auth.steam) {
-		byId('login-note').textContent = '本服未开启此页面可用的登录方式。请在同源浏览器客户端登录后刷新，或请管理员开启本服密码 / Steam 登录。';
+		byId('login-note').textContent = '本服未开启此页面可用的登录方式。请在同源浏览器客户端登录，本页会自动读取 auth；或请管理员开启本服密码 / Steam 登录。';
 	} else {
-		byId('login-note').textContent = '可先自由设计。登录不会改变地图或赛季数据。';
+		byId('login-note').textContent = '可先自由设计。同源游戏客户端已登录时，本页会自动读取 auth 登录；也可使用下方登录方式。';
 	}
 }
 
@@ -358,6 +371,73 @@ button('new').addEventListener('click', () => {
 	}
 });
 
+const svgPrompt = String.raw`请设计一个用于 Screeps Badge 的 SVG 头像。
+
+主题：【填写你想要的主题】
+
+必须遵守以下规则：
+
+1. 输出完整、合法的 SVG，根节点为：
+   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+
+2. 只使用三个不透明纯色：一个背景色、两个前景色。
+   颜色统一使用 #rrggbb 格式，不使用渐变或半透明。
+
+3. 第一个绘制元素必须是铺满画布的背景：
+   <rect x="0" y="0" width="100" height="100" fill="背景色"/>
+   不要用局部图形代替背景，否则其颜色会被自动铺满整个头像。
+
+4. 背景之后，先绘制全部前景色 A 的图形，再绘制全部前景色 B 的图形。
+   B 覆盖 A，不允许 A/B/A 交错叠放。
+   后续不要再绘制背景色图形。
+
+5. 使用 path、rect、circle、ellipse、polygon 或 g。
+   优先直接使用坐标和 fill 属性，不依赖 CSS、transform 或引用。
+   所有坐标及曲线控制点尽量位于 0～100 内。
+
+6. 只使用填充，不使用 stroke 描边。
+   轮廓线请转换成有面积的填充形状。
+   使用 nonzero 填充规则，不使用 evenodd。
+
+7. 不使用文字、图片、脚本、事件属性、链接、use、动画、
+   滤镜、纹理、外部资源、style 样式表或自定义 clipPath。
+   如需文字效果，请直接绘制字形路径。
+
+8. 头像会被游戏圆形裁切，主体放在中央，边缘留出空间。
+   图案应在 32×32 像素下仍然清晰，避免过细线条和复杂细节。
+
+9. 文件小于 64 KiB，路径简洁，路径数据总长度尽量远低于 32768 字符。
+
+只输出 SVG 源码，不要输出解释、Markdown 代码围栏或其他内容。`;
+
+button('svg-prompt').addEventListener('click', () => {
+	const dialog = byId<HTMLDialogElement>('svg-prompt-dialog');
+	const text = byId<HTMLTextAreaElement>('svg-prompt-text');
+	text.value = svgPrompt;
+	byId('svg-prompt-status').textContent = '复制后把主题替换成你想要的内容，再交给生成 SVG 的 AI。';
+	if (!dialog.open) { dialog.showModal(); }
+	text.focus();
+	text.select();
+});
+button('copy-svg-prompt').addEventListener('click', () => {
+	void (async () => {
+		const copy = button('copy-svg-prompt');
+		copy.disabled = true;
+		try {
+			if (!navigator.clipboard) { throw new Error('Clipboard unavailable'); }
+			await navigator.clipboard.writeText(svgPrompt);
+			byId('svg-prompt-status').textContent = '提示词已复制。粘贴后替换主题即可使用。';
+		} catch {
+			const text = byId<HTMLTextAreaElement>('svg-prompt-text');
+			text.focus();
+			text.select();
+			byId('svg-prompt-status').textContent = '浏览器不允许自动复制，已选中提示词；请按 Ctrl/Cmd+C 或使用系统复制菜单。';
+		} finally {
+			copy.disabled = false;
+		}
+	})();
+});
+
 button('import-svg').addEventListener('click', () => { input('svg-file').click(); });
 input('svg-file').addEventListener('change', () => {
 	const file = input('svg-file').files?.[0];
@@ -456,7 +536,8 @@ async function loadAccount(replace: boolean) {
 	const next = await api<Profile>('custom-badge/me');
 	if (epoch !== authEpoch) { return; }
 	profile = next;
-	if (replace || !dirty) {
+	const hasLocalEdits = dirty || polygon !== null || drag !== null;
+	if (replace || !hasLocalEdits) {
 		// A tightened server limit must not make an old drawing impossible to inspect/remove shapes.
 		// Read old drafts using hard bounds; publishing still checks the current configured limits.
 		drawing = next.draft ? compileDrawing(next.draft, hardLimits).drawing : newDrawing();
@@ -464,7 +545,33 @@ async function loadAccount(replace: boolean) {
 		selected = drawing.shapes[0]?.id ?? null;
 	}
 	render();
-	status(dirty ? '已登录，保留了你的本地设计。保存将更新此账号的草稿。' : '已载入账号草稿。可调色和编辑，完成后点击「保存并应用」。', 'success');
+	status(!replace && hasLocalEdits ? '已登录，保留了你的本地设计。保存将更新此账号的草稿。' : '已载入账号草稿。可调色和编辑，完成后点击「保存并应用」。', 'success');
+}
+
+async function syncSharedLogin() {
+	if (!ready || profile !== null || busy || refreshing || document.hidden) { return; }
+	const shared = sharedToken();
+	if (!shared) {
+		lastSharedAttempt = '';
+		sharedRetryAt = 0;
+		return;
+	}
+	if (shared === lastSharedAttempt && Date.now() < sharedRetryAt) { return; }
+	lastSharedAttempt = shared;
+	sharedRetryAt = Date.now() + 15000;
+	await operation(async () => {
+		++authEpoch;
+		setToken(shared);
+		try {
+			await loadAccount(false);
+			sharedRetryAt = 0;
+		} catch (caught) {
+			// Back off rejected auth for one minute and transient failures for 15 seconds.
+			// A changed auth bypasses the delay and is attempted immediately.
+			if (caught instanceof ApiError && caught.status === 401) { sharedRetryAt = Date.now() + 60000; }
+			throw caught;
+		}
+	});
 }
 
 byId<HTMLFormElement>('login-form').addEventListener('submit', event => {
@@ -484,7 +591,7 @@ button('logout').addEventListener('click', () => {
 	drawing = newDrawing(); dirty = false; polygon = null; selected = drawing.shapes[0]!.id;
 	past.length = 0; future.length = 0;
 	byId('admin-actions').hidden = true; byId('admin-output').textContent = '';
-	render(); status('已退出本页面，不会退出其他游戏窗口。');
+	render(); status('已退出本页面。若游戏客户端仍有有效 auth，本页会自动重新登录；保持未登录需同时退出游戏客户端。');
 });
 button('reload').addEventListener('click', () => {
 	if (!dirty || confirm('重新载入会丢弃当前未保存的设计，是否继续？')) { void operation(() => loadAccount(true)); }
@@ -564,7 +671,8 @@ window.addEventListener('beforeunload', event => {
 // a background request could silently defeat optimistic concurrency or discard ongoing edits.
 let refreshing = false;
 async function refreshSession() {
-	if (!profile || !token || busy || refreshing || document.hidden) { return; }
+	if (!profile) { await syncSharedLogin(); return; }
+	if (!token || busy || refreshing || document.hidden) { return; }
 	const epoch = authEpoch;
 	refreshing = true;
 	try {
@@ -572,10 +680,19 @@ async function refreshSession() {
 		if (epoch === authEpoch) { profile.blocked = current.blocked; updateControls(); }
 	} catch (caught) {
 		if (epoch === authEpoch && caught instanceof ApiError && caught.status === 401) { error(caught); }
-	} finally { refreshing = false; }
+	} finally {
+		refreshing = false;
+		void syncSharedLogin();
+	}
 }
 setInterval(() => { void refreshSession(); }, 45000);
+// The writing window does not receive its own storage event, so polling also covers that case.
+setInterval(() => { void syncSharedLogin(); }, 3000);
 document.addEventListener('visibilitychange', () => { void refreshSession(); });
+window.addEventListener('focus', () => { void refreshSession(); });
+window.addEventListener('storage', event => {
+	if (event.key === 'auth' || event.key === null) { void syncSharedLogin(); }
+});
 
 render();
 void operation(async () => {
@@ -583,6 +700,10 @@ void operation(async () => {
 	// Preserve valid existing drafts when limits decrease, but never let the server's hard bounds
 	// be exceeded. Rendering uses hard limits; editing/saving reports the configured limit.
 	if (drawing.shapes.length > options.maxShapes) { drawing.shapes.length = options.maxShapes; }
+	ready = true;
 	render();
+	// Configuration loading is asynchronous; auth may have changed since module startup.
+	const shared = sharedToken();
+	if (shared) { setToken(shared); }
 	if (token) { await loadAccount(false); } else { status('先自由设计，登录后即可保存。'); }
 });
