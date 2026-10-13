@@ -1,5 +1,6 @@
 import type { Drawing, Limits, Point, Shape } from './drawing.js';
-import { compileDrawing, defaultLimits, maxPoints, newDrawing, polygonFromCanvas, shapePath } from './drawing.js';
+import { compileDrawing, defaultLimits, maxPoints, maxRequestBytes, newDrawing, polygonFromCanvas, shapePath } from './drawing.js';
+import { importSvg } from './svg-import.js';
 
 interface Profile {
 	userId: string;
@@ -156,7 +157,7 @@ function preview(size: number) {
 	byId(`preview${size}`).replaceChildren(svg);
 }
 
-const labels = { circle: '圆形', rectangle: '矩形', triangle: '三角形', polygon: '多边形' };
+const labels = { circle: '圆形', rectangle: '矩形', triangle: '三角形', polygon: '多边形', path: 'SVG 路径' };
 const selectedShape = () => drawing.shapes.find(shape => shape.id === selected);
 const serialize = () => JSON.stringify(drawing);
 
@@ -169,6 +170,8 @@ function updateControls() {
 	button('undo').disabled = busy || past.length === 0 || polygon !== null;
 	button('redo').disabled = busy || future.length === 0 || polygon !== null;
 	button('new').disabled = busy;
+	button('import-svg').disabled = busy || polygon !== null || drag !== null;
+	input('svg-file').disabled = busy || polygon !== null || drag !== null;
 	button('logout').hidden = profile === null;
 	button('logout').disabled = busy;
 	byId('login-panel').hidden = profile !== null;
@@ -332,6 +335,28 @@ button('new').addEventListener('click', () => {
 		polygon = null;
 		edit(() => { drawing = { schemaVersion: 1, colors: [ ...drawing.colors ], shapes: [] }; selected = null; });
 	}
+});
+
+button('import-svg').addEventListener('click', () => { input('svg-file').click(); });
+input('svg-file').addEventListener('change', () => {
+	const file = input('svg-file').files?.[0];
+	input('svg-file').value = '';
+	if (!file) { return; }
+	void operation(async () => {
+		if (!/\.svg$/i.test(file.name)) { throw new Error('请选择 .svg 文件'); }
+		if (file.size > maxRequestBytes) { throw new Error('SVG 文件不能超过 64 KiB'); }
+		// Parse first, then ask before replacing a valid design. A failed/cancelled import leaves
+		// the drawing, undo history, version and server data completely unchanged.
+		const imported = importSvg(await file.text(), options, drawing.colors);
+		if ((dirty || drawing.shapes.length !== 0) && !confirm('导入 SVG 将替换当前设计，可以使用撤销恢复。是否继续？')) { return; }
+		const before = serialize();
+		drawing = imported;
+		polygon = null;
+		selected = drawing.shapes[0]?.id ?? null;
+		remember(before);
+		render();
+		status('SVG 已导入为原生图层。可拖动、缩放、旋转、镜像和调色；确认预览后点击「保存并应用」。当前游戏头像尚未改变。', 'success');
+	});
 });
 
 function travel(from: string[], to: string[]) {

@@ -157,7 +157,7 @@ hooks.register('middleware', (koa, router) => {
 		context.type = 'html';
 		context.body = editorPage;
 	});
-	for (const file of [ 'editor.js', 'drawing.js' ]) {
+	for (const file of [ 'editor.js', 'drawing.js', 'svg-path.js', 'svg-import.js' ]) {
 		router.get(`/custom-badge/assets/${file}`, async context => {
 			let contents = assets.get(file);
 			if (contents === undefined) {
