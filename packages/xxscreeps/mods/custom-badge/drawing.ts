@@ -22,7 +22,7 @@ export interface Shape {
 
 export interface Drawing {
 	schemaVersion: 1;
-	/** SVG uploads are preview/save-only in Studio, including after reloading a draft. */
+	/** Origin metadata only; SVG uploads remain editable, including after reloading a draft. */
 	source?: 'svg';
 	colors: [ string, string, string ];
 	shapes: Shape[];
