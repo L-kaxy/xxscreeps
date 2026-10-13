@@ -166,7 +166,7 @@ hooks.register('version', serverData => {
 				href: '/speedrun-season2',
 				id: 'menu-item-speedrun-season2',
 				label: 'Speedrun Season 2',
-				svg: 'leaderboard',
+				svg: 'season-world',
 				target: '_blank',
 			},
 		} ],
