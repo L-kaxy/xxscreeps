@@ -2,6 +2,7 @@ import type { JSONSchemaType } from 'ajv';
 import { hooks, makeValidatedPayloadRoute } from 'xxscreeps/backend/index.js';
 import { acquireCleanup, blocksSpawn, cleanupSpawnError } from './respawn.js';
 import { allowsInitialSpawn, spawnRoomError } from './rooms.js';
+import './leaderboard-backend.js';
 
 interface PlaceSpawnRequest {
 	name: string;

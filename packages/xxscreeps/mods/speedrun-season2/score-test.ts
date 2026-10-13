@@ -26,7 +26,8 @@ function shortBrackets() {
 	const settings = config.speedrunSeason2!;
 	const previous = { ...settings };
 	settings.raceBrackets = [ 2, 4 ];
-	settings.respawnAfter = 4;
+	// This suite isolates scoring; full timed respawn is covered in restart-test.
+	settings.respawnAfter = 0;
 	return { [Symbol.dispose]() {
 		Object.assign(settings, previous);
 		if (previous.raceBrackets === undefined) {
@@ -441,7 +442,8 @@ describe('season-2 scores', () => {
 		try {
 			await fs.writeFile(path.join(directory, '.screepsrc.yaml'), JSON.stringify({
 				mods: [ 'xxscreeps/mods/classic', 'xxscreeps/mods/speedrun-season2' ],
-				speedrunSeason2: { raceBrackets: [ 2, 4 ], respawnAfter: 4 },
+				// This persisted fixture isolates score recovery, not the timed-respawn suite.
+				speedrunSeason2: { raceBrackets: [ 2, 4 ], respawnAfter: 0 },
 				runner: { sandbox: 'unsafe' },
 			}));
 			const run = async (source: string) => (await command(process.execPath,

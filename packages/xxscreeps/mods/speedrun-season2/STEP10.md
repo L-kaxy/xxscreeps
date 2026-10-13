@@ -1,6 +1,8 @@
 # 第 10 步验收：手动 respawn 全区清场
 
-日期：2026-10-13。第 9 步已由用户确认通过。本步只接入手动退出及其清场恢复，**不实现第 11 步到期自动重开，不增加排行榜 API/页面**。按用户追加要求：中央九房的 Extractor 不包括在清理范围内。当前等待用户验收。
+后续验收记录：用户确认“通过，剩下的一步到位全部完成，我一起验收”。第 10 步已通过；本文保留当时的单步交付范围，当前自动重开和榜单功能见 [STEP11-14.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP11-14.md)。
+
+日期：2026-10-13。第 9 步已由用户确认通过。本步只接入手动退出及其清场恢复，**不实现第 11 步到期自动重开，不增加排行榜 API/页面**。按用户追加要求：中央九房的 Extractor 不包括在清理范围内。当时等待用户验收；现已通过，见上方后续记录。
 
 同日按用户要求收窄公共修改：**新 mod 外仅保留 `classic/spawn/model.ts` 的 respawn 扩展入口**。`classic/spawn/backend.ts`、`engine/processor/room.ts`、`engine/processor/symbols.ts` 已恢复为本步之前的内容。下文描述当前单公共文件方案。
 

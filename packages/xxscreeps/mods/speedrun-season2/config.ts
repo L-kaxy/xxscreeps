@@ -1,6 +1,6 @@
 /**
  * Independent season-2 settings for E1N1 through E9N9.
- * Initial spawn is fixed; periodic Invaders and manual cleanup are configurable.
+ * Initial spawn is fixed; periodic Invaders and respawn cleanup are configurable.
  * Deposits, power banks, claiming and ruins remain global switches under `speedrun`.
  */
 export interface SpeedrunSeason2Settings {
@@ -36,7 +36,7 @@ export interface SpeedrunSeason2Settings {
 export interface SpeedrunSeason2Config {
 	/**
 	 * Independent season-2 settings; global switches exist only under `speedrun`.
-	 * Initial spawn, Invaders, scoring and manual cleanup are connected; automatic reset arrives later.
+	 * Initial spawn, Invaders, scoring, manual cleanup and timed respawn use this root.
 	 */
 	speedrunSeason2?: SpeedrunSeason2Settings;
 }

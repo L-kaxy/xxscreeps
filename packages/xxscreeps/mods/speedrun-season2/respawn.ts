@@ -1,3 +1,4 @@
+import type { RunIdentity } from './race.js';
 import type { Shard } from 'xxscreeps/engine/db/shard.js';
 import type { RoomObject } from 'xxscreeps/game/object.js';
 import type { Room } from 'xxscreeps/game/room/index.js';
@@ -12,7 +13,7 @@ import { Structure } from 'xxscreeps/mods/classic/structure/structure.js';
 import { saveUserFlagBlobForNextTick } from 'xxscreeps/mods/meta/flag/model.js';
 import { activeRunKey } from 'xxscreeps/mods/speedrun/race-lifecycle.js';
 import * as C from 'xxscreeps:mods/constants';
-import { stopRun } from './race.js';
+import { hasNewerSeason2Run, runKey, stopCleanupRun } from './race.js';
 import { isSeason2Room, season2SpawnRoom } from './rooms.js';
 
 export const cleanupKey = 'speedrun-season2/cleanup';
@@ -27,6 +28,9 @@ export interface CleanupJob {
 	rooms: string[];
 	block: string[];
 	finishedTick?: number;
+	/** Absent only for legacy jobs or manual respawn when scoring was disabled. */
+	run?: RunIdentity;
+	cancelled?: boolean;
 }
 
 // Explicit player-buildable types, not "everything with hits" or "every Structure".
@@ -86,6 +90,24 @@ async function queueRoom(shard: Shard, job: CleanupJob, room: string) {
 	});
 }
 
+/** Caller holds the cleanup gate. Persist before ending the clock or scheduling destructive work. */
+export async function reserveCleanup(
+	shard: Shard, user: string, rooms: readonly string[], time: number, run?: RunIdentity,
+) {
+	const world = await shard.loadWorld();
+	const block = [ ...world.terrain.keys() ].filter(isSeason2Room).sort();
+	const cleanup = config.speedrunSeason2?.respawnCleanup !== false;
+	const targets = [ ...new Set([
+		...rooms, ...world.terrain.has(season2SpawnRoom) ? [ season2SpawnRoom ] : [], ...cleanup ? block : [],
+	]) ];
+	const job: CleanupJob = {
+		id: randomUUID(), user, requestedTick: time, status: 'preparing', cleanup, rooms: targets, block,
+		...run ? { run } : {},
+	};
+	await shard.data.set(cleanupKey, JSON.stringify(job));
+	return job;
+}
+
 /**
  * Verify every target's persisted current buffer on a tick after the request, not the processor's
  * in-memory room or its not-yet-current next buffer. Lost scratch queues are rebuilt after restart.
@@ -97,10 +119,15 @@ export async function advanceCleanup(shard: Shard, time: number) {
 		return;
 	}
 	// Outside the block mutex: the race adapter has its own account-level lock.
-	await stopRun(shard, initial.user, initial.requestedTick);
+	const stopped = await stopCleanupRun(shard, initial.user, initial.requestedTick, initial.run);
 	await using handle = await acquireCleanup(shard);
 	const job = handle.job;
 	if (job?.id !== initial.id || job.status === 'complete') {
+		return;
+	}
+	if (!stopped) {
+		// An imported/admin-replaced or cross-season clock supersedes this job; old intents become no-ops.
+		await shard.data.set(cleanupKey, JSON.stringify({ ...job, status: 'complete', cancelled: true, finishedTick: time }));
 		return;
 	}
 	const remaining: string[] = [];
@@ -148,25 +175,22 @@ registerRespawnInterceptor(async (shard, user, rooms) => {
 			if (!inSeason && landing?.['#user'] !== user) {
 				return undefined;
 			}
-			const block = [ ...world.terrain.keys() ].filter(isSeason2Room).sort();
-			const cleanup = config.speedrunSeason2?.respawnCleanup !== false;
-			const targets = [ ...new Set([ ...rooms, ...landing ? [ season2SpawnRoom ] : [], ...cleanup ? block : [] ]) ];
-			job = { id: randomUUID(), user, requestedTick: shard.time, status: 'preparing', cleanup, rooms: targets, block };
-			await shard.data.set(cleanupKey, JSON.stringify(job));
+			const info = await shard.db.data.hGetAll(runKey(user));
+			if ((landing && landing['#user'] !== null && landing['#user'] !== user) ||
+				(inSeason && await hasNewerSeason2Run(shard, user, Number(info.startedTick)))) {
+				// A defeated player may still press respawn after the next player has landed. They
+				// retain ordinary global exit, but cannot use their old clock to wipe the new block.
+				return undefined;
+			}
+			const run = inSeason && info.run !== undefined && info.room !== undefined && info.startedTick !== undefined
+				? { run: info.run, room: info.room, startedTick: info.startedTick } : undefined;
+			job = await reserveCleanup(shard, user, rooms, shard.time, run);
 			if (previous) {
 				// Earlier step-10 builds used a save-hook acknowledgment hash; it is no longer read.
 				await shard.data.vDel(`speedrun-season2/cleanup-acks/${previous.id}`);
 			}
 		}
 	}
-	// Persist the gate before stopping the clock or queueing any destructive work.
-	await stopRun(shard, user, job.requestedTick);
-	{
-		await using handle = await acquireCleanup(shard);
-		if (handle.job?.id === job.id && handle.job.status !== 'complete') {
-			await shard.data.set(cleanupKey, JSON.stringify({ ...job, status: 'pending' }));
-			await Promise.all(job.rooms.map(name => queueRoom(shard, job, name)));
-		}
-	}
+	await advanceCleanup(shard, shard.time);
 	return job.rooms;
 });
