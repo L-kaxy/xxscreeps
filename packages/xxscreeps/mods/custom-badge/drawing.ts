@@ -1,9 +1,11 @@
-/** Shared, dependency-free geometry compiler. Only structured shapes, never SVG/XML input. */
+import { SvgPathError, mapPath, parsePath, pathText, positiveWinding } from './svg-path.js';
+
+/** Shared geometry compiler. SVG imports arrive as bounded, numeric-only local paths, never XML. */
 export interface Point { x: number; y: number }
 
 export interface Shape {
 	id: string;
-	kind: 'circle' | 'rectangle' | 'triangle' | 'polygon';
+	kind: 'circle' | 'rectangle' | 'triangle' | 'polygon' | 'path';
 	layer: 1 | 2;
 	x: number;
 	y: number;
@@ -14,6 +16,8 @@ export interface Shape {
 	mirrorY: boolean;
 	/** Polygon-local coordinates, from -50 to 50. */
 	points?: Point[];
+	/** Imported path-local coordinates, from -50 to 50. No SVG markup or attributes. */
+	path?: string;
 }
 
 export interface Drawing {
@@ -93,6 +97,25 @@ function parsePoints(value: unknown): Point[] {
 	return points;
 }
 
+function parseLocalPath(value: unknown, limits: Limits): string {
+	if (typeof value !== 'string' || value.length > limits.maxPathLength) {
+		throw new DrawingError('导入路径必须是字符串且不能超过路径长度上限');
+	}
+	try {
+		const commands = parsePath(value);
+		for (const command of commands) {
+			for (const point of command.points) {
+				point.x = number(point.x, -50, 50);
+				point.y = number(point.y, -50, 50);
+			}
+		}
+		return pathText(positiveWinding(commands));
+	} catch (error) {
+		if (error instanceof SvgPathError) { throw new DrawingError(error.message); }
+		throw error;
+	}
+}
+
 export function parseDrawing(value: unknown, limits = defaultLimits): Drawing {
 	const drawing = object(value, [ 'schemaVersion', 'colors', 'shapes' ]);
 	if (drawing.schemaVersion !== 1 || !Array.isArray(drawing.colors) || drawing.colors.length !== 3 ||
@@ -103,13 +126,14 @@ export function parseDrawing(value: unknown, limits = defaultLimits): Drawing {
 		throw new DrawingError(`最多允许 ${limits.maxShapes} 个图形`);
 	}
 	const ids = new Set<string>();
+	let importedLength = 0;
 	const shapes = drawing.shapes.map((value: unknown): Shape => {
-		const shape = object(value, [ 'id', 'kind', 'layer', 'x', 'y', 'width', 'height', 'rotation', 'mirrorX', 'mirrorY', 'points' ]);
+		const shape = object(value, [ 'id', 'kind', 'layer', 'x', 'y', 'width', 'height', 'rotation', 'mirrorX', 'mirrorY', 'points', 'path' ]);
 		if (typeof shape.id !== 'string' || shape.id.length < 1 || shape.id.length > 40 || /[^a-zA-Z0-9_-]/.test(shape.id) || ids.has(shape.id)) {
 			throw new DrawingError('图形 ID 不合法或重复');
 		}
 		ids.add(shape.id);
-		if (shape.kind !== 'circle' && shape.kind !== 'rectangle' && shape.kind !== 'triangle' && shape.kind !== 'polygon') {
+		if (shape.kind !== 'circle' && shape.kind !== 'rectangle' && shape.kind !== 'triangle' && shape.kind !== 'polygon' && shape.kind !== 'path') {
 			throw new DrawingError('不支持的图形类型');
 		}
 		if (shape.layer !== 1 && shape.layer !== 2) {
@@ -118,6 +142,15 @@ export function parseDrawing(value: unknown, limits = defaultLimits): Drawing {
 		if (shape.kind !== 'polygon' && shape.points !== undefined) {
 			throw new DrawingError('只有多边形可以携带顶点');
 		}
+		if (shape.kind !== 'path' && shape.path !== undefined) {
+			throw new DrawingError('只有导入路径可以携带 path');
+		}
+		let path: string | undefined;
+		if (shape.kind === 'path') {
+			path = parseLocalPath(shape.path, limits);
+			importedLength += path.length;
+			if (importedLength > limits.maxPathLength) { throw new DrawingError('导入路径合计过长，请先简化 SVG'); }
+		}
 		return {
 			id: shape.id, kind: shape.kind, layer: shape.layer,
 			x: number(shape.x, 0, 100), y: number(shape.y, 0, 100),
@@ -125,6 +158,7 @@ export function parseDrawing(value: unknown, limits = defaultLimits): Drawing {
 			rotation: number(shape.rotation, -180, 180),
 			mirrorX: boolean(shape.mirrorX), mirrorY: boolean(shape.mirrorY),
 			...shape.kind === 'polygon' ? { points: parsePoints(shape.points) } : {},
+			...path === undefined ? {} : { path },
 		};
 	});
 	const [ first, second, third ] = drawing.colors as [ string, string, string ];
@@ -143,8 +177,18 @@ function transform(shape: Shape, point: Point, mirror = true): Point {
 
 const coordinates = (point: Point) => `${Math.round(point.x * 1000) / 1000} ${Math.round(point.y * 1000) / 1000}`;
 
-/** Only call with validated shapes. All closed subpaths have the same winding, including mirrors. */
+/** Validated shapes only. Primitives keep positive winding; imported paths retain their holes'
+ * relative winding while keeping the largest contour positive, including after mirrors. */
 export function shapePath(shape: Shape): string {
+	if (shape.kind === 'path') {
+		const angle = shape.rotation * Math.PI / 180;
+		const scaleX = shape.width / 100 * (shape.mirrorX ? -1 : 1);
+		const scaleY = shape.height / 100 * (shape.mirrorY ? -1 : 1);
+		return pathText(positiveWinding(mapPath(parsePath(shape.path!), [
+			Math.cos(angle) * scaleX, Math.sin(angle) * scaleX,
+			-Math.sin(angle) * scaleY, Math.cos(angle) * scaleY, shape.x, shape.y,
+		])));
+	}
 	if (shape.kind === 'circle') {
 		// Four cubic Béziers approximate an ellipse. Reflection doesn't change an ellipse; omitting it
 		// keeps winding positive, so overlapping same-layer objects cannot cancel each other out.
