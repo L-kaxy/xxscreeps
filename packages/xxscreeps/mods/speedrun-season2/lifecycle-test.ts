@@ -321,7 +321,10 @@ describe('season-2 lifecycle', () => {
 		assert.strictEqual((await active(shard)).active, false);
 	}));
 
-	test('scoring consumes due entries but does not automatically respawn at expiry', () => fresh(async ({ shard }) => {
+	test('zero respawnAfter allows scoring without automatic respawn', () => fresh(async ({ shard }) => {
+		const settings = config.speedrunSeason2!;
+		config.speedrunSeason2 = { ...settings, respawnAfter: 0 };
+		using restore = { [Symbol.dispose]() { config.speedrunSeason2 = settings; } };
 		const world = await worldOf(shard);
 		await processRoom(shard, world, 'E3N3');
 		const before = await shard.db.data.hGetAll(Season2.runKey('100'));

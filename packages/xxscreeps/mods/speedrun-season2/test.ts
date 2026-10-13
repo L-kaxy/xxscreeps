@@ -23,6 +23,9 @@ import './global-rules-test.js';
 import './lifecycle-test.js';
 import './score-test.js';
 import './respawn-test.js';
+import './restart-test.js';
+import './leaderboard-test.js';
+import './page-test.js';
 
 const season1Mod = 'xxscreeps/mods/speedrun';
 const season2Mod = 'xxscreeps/mods/speedrun-season2';
@@ -68,7 +71,7 @@ async function inspectConfig(raw: object): Promise<ConfigInspection> {
 }
 
 describe('mods/speedrun-season2', () => {
-	test('global claim and ruin rules reuse season 1; main only adds independent scoring', () => {
+	test('global claim and ruin rules reuse season 1; main and backend providers remain independent', () => {
 		assert.deepStrictEqual(manifest.dependencies, [ season1Mod ]);
 		assert.deepStrictEqual(manifest.provides, [ 'backend', 'config', 'main', 'processor', 'test' ]);
 	});

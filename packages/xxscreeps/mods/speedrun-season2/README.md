@@ -2,9 +2,9 @@
 
 在同一 shard 上保留赛季 1，并新增赛季 2。两个赛季共用游戏引擎和账号体系，复用基础玩法逻辑，但各自按区块运行地图规则、Invader 控制、比赛计时和计分，并使用独立配置、存储和排行榜页面。
 
-方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～9 步已由用户验收通过。第 10 步接入手动 respawn 全区清场，中央九房已建成 Extractor 保留，等待用户验收。新 mod 注册 `backend`、`config`、`main`、`processor`、`test` provider；main 采集新赛季档位成绩并恢复已请求的清场，地图和补墙仍是显式 CLI，不在启动时拍图。**赛季 2 自动重开、排行榜 HTTP API 和页面尚未接入；中间步骤只在测试副本验收，不在线上开放未完成的赛季 2。** 前序验收见同目录步骤文档及 [封墙补充文档](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP4-HIGHWAYS.md)。
+方案确认日期：2026-10-12；进度更新：2026-10-13。第 0～10 步已由用户验收通过。用户授权剩余步骤合并交付；自动重开、独立排行榜 API/页面和双赛季回归已接入，等待一次联合验收。新 mod 注册 `backend`、`config`、`main`、`processor`、`test` provider；地图及补墙仍是显式 CLI，不在启动时拍图。**本轮所有新增改动留在赛季 2 mod 内，没有部署线上或开放赛季。**
 
-逐步开发顺序和验收进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。每步完成自动测试后交付用户验收，用户确认通过才继续下一步；第 10 步操作见 [STEP10.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP10.md)，本轮不提前开始第 11 步。
+当前部署、升级注意事项、联合测试与回滚说明见 [STEP11-14.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/STEP11-14.md)；进度见 [TODO.md](/Users/jason/workspace/nodejs/xxscreeps/packages/xxscreeps/mods/speedrun-season2/TODO.md)。原逐步验收文档保留当时阶段的历史范围，不代表当前自动重开仍未实现。
 
 ## 赛季范围和规则
 
@@ -154,16 +154,16 @@ API 层与实际 `placeSpawn` processor 共用赛季范围和落地限制：
 
 第 8 步已实现上述独立开局及双向切换。`speedrun/active/<userId>` 是账号级协调元数据，只标记 namespace、shard、run、room、startedTick 和 active，不存成绩；停止后保留 inactive 标记，旧版赛季 1 的无标记活动 run 仍兼容。启动/停止及旧赛季计分/到期任务通过玩家级数据库互斥避免切换交错，旧成绩键名保持不变；这不增加落地人数限制。
 
-初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。第 9 步已消费独立 due 并写入新 score/rank/best/runs/brackets，提供存储级排名与历史读取；赛季 2 快照按局/档位防重放，旧赛季默认行为不变。第 10 步只接入手动 respawn 清场；尚不自动重开，也没有新 HTTP API/页面，后续分步接入。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
+初期赛季 2 沿用旧赛季默认的 20k、40k 计分档位和 40k 自动重开窗口，但从独立配置读取。第 9 步已消费独立 due 并写入新 score/rank/best/runs/brackets，提供存储级排名与历史读取；赛季 2 快照按局/档位防重放，旧赛季默认行为不变。第 11～14 步已接入自动重开及独立 HTTP API/页面；先记录末档成绩，再结束当前局并请求持久化清场。账号、代码、Memory 和 GCL 仍共用，不建立独立账号体系。
 
 ## Respawn 和赛季 2 全区清场
 
-玩家退出和地图清场是两项操作。两个赛季的玩家退出都可复用现有整体 `respawnPlayer`：清掉该玩家所有房间的对象、释放控制器，并保持现有旗帜处理。无需把玩家整体 respawn 限定在赛季区块内。
+玩家退出和地图清场是两项操作。手动退出经现有整体 `respawnPlayer` 的扩展入口；赛季 2 自动退出预留同一种持久化清场任务，共用退出、旗帜清理及恢复路径，避免在玩家锁内递归调用 `respawnPlayer`。两者都清掉该玩家所有目标房间的对象并释放控制器，不把玩家整体退出限定在赛季区块内。
 
 地图清场则按触发本次退出的赛季执行：
 
 - 赛季 1 沿用原有建筑清理范围和规则。
-- 赛季 2 清理 `E1N1～E9N9` 全部 81 房的人造建筑，不限于 `E3N3`，也不限于玩家的 presence 房间。第 10 步仅接入手动 respawn；第 11 步再接入到期自动 respawn。
+- 赛季 2 清理 `E1N1～E9N9` 全部 81 房的人造建筑，不限于 `E3N3`，也不限于玩家的 presence 房间。手动及到期自动退出使用相同的清场规则。
 - 赛季 2 清场不按建筑 owner 过滤，无主的 Road、Container、Wall 以及其他玩家留下的人造建筑同样清掉。
 - 人造建筑的 Construction Site 一并清理，避免下一局继承施工残留。
 - Source、Mineral、Controller、Keeper Lair 等原生对象保留；地形不重新生成，不恢复为旧赛季统一地形。
@@ -199,9 +199,11 @@ speedrun-season2/runs/<bracket>/<userId>
 speedrun-season2/brackets/<userId>
 speedrun-season2/due
 speedrun-season2/racing
+speedrun-season2/cleanup
+speedrun-season2/landing
 ```
 
-沿用现有存储结构：run、score、rank、best、玩家历史索引放在账号级 `db.data`；due 和 racing 放在 `shard.data`。这里的独立表是独立 hash、sorted set 等存储键，不需要引入 SQL 数据库。
+沿用现有存储结构：run、score、rank、best、玩家历史索引放在账号级 `db.data`；due、racing、cleanup 及最新成功落地标记 landing 放在 `shard.data`；后两者是安全协调状态，不是成绩表。这里的独立表是独立 hash、sorted set 等存储键，不需要引入 SQL 数据库。
 
 新页面及接口独立提供：
 
@@ -210,15 +212,17 @@ speedrun-season2/racing
 /api/speedrun-season2/leaderboard
 /api/speedrun-season2/records/:user
 /api/speedrun-season2/racing
+speedrun-season2/cleanup
+speedrun-season2/landing
 ```
 
 旧 `/speedrun` 和 `/api/speedrun/*` 不变，旧成绩不迁移、不改名，也不作为赛季 2 的最好成绩或局数来源。两个排行榜和实时榜只读取本赛季的状态与记录。
 
 旧活动任务若指向旧区块之外，应停止计分和到期清理。若已有历史成绩指向区块外，保留原始数据，但读榜时按本赛季区块过滤，不静默删掉历史数据。
 
-## 后续模块划分
+## 模块划分
 
-目录采用现有 mod provider 结构，后续按需新增文件：
+目录采用现有 mod provider 结构：
 
 | 模块 | 职责 |
 | --- | --- |
@@ -228,15 +232,15 @@ speedrun-season2/racing
 | `processor.ts` | 按区块处理玩法、落地、Invader 和清场 intent |
 | `respawn.ts` | 赛季 2 全区人造建筑清理 |
 | `race.ts` | 使用独立前缀的比赛状态、计分和读榜 |
-| `main.ts` | 当前仅赛季 2 计分；到期重开第 11 步接入，不封墙、不关闭中央九房 |
-| `backend.ts` 及 `page.ts` | 独立榜单 API、页面和客户端入口 |
+| `main.ts` / `restart.ts` | 新赛季计分、当前局到期检查与持久化清场恢复，不封墙、不关闭中央九房 |
+| `backend.ts` / `leaderboard-backend.ts` / `page.ts` | 落地门禁、独立榜单 API、页面和客户端入口 |
 | 旧 mod 的 `driver.ts` 及 `game.ts` | 复用唯一的全图 claim payload 和 API 限制，新 mod 不重复注册 |
 | 地图初始化工具及静态资源 | 导入原版地图并按平移映射写入新区块 |
 | `test.ts` | 两个赛季的隔离与回归测试 |
 
 旧赛季作必要的区块化和复用逻辑调整，不复制出两套互相竞争的全局钩子。共用逻辑接收显式赛季参数，两套 provider 分别注册自己的区块、配置、存储和接口。
 
-地图源数据后续固定为仓库内的静态资源，部署时不依赖开发机的 `screeps-server-mockup` 绝对路径。第 1 步 manifest 仅声明已实现的 `config` 和 `test`，不注册尚未实现的运行 provider，避免骨架加载时产生地图或玩法修改。
+地图源数据已固定为仓库内的静态资源，部署时不依赖开发机的 `screeps-server-mockup` 绝对路径。地图初始化、外围封墙仍是显式停服操作，加载 mod 不会重拍地图。
 
 ## 实施顺序和验收
 

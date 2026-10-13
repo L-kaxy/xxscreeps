@@ -4,7 +4,7 @@ import { intentProcessors, roomTickProcessors } from 'xxscreeps/engine/processor
 import { Game, me } from 'xxscreeps/game/index.js';
 import { Room } from 'xxscreeps/game/room/index.js';
 import { withCleanup } from './cleanup-processor.js';
-import { startRun, stopRun } from './race.js';
+import { landingKey, startRun, stopRun } from './race.js';
 import { blocksSpawn } from './respawn.js';
 import { allowsInitialSpawn, isSeason2Room } from './rooms.js';
 import './respawn-processor.js';
@@ -42,6 +42,10 @@ placeSpawn.process = (room: Room, context: ProcessorContext, ...data: unknown[])
 			if (wasUnowned && room['#user'] === me) {
 				if (isSeason2Room(room.name)) {
 					context.task(startRun(context.shard, me, room.name, Game.time));
+					// Seal the gap between the synchronous handover and its asynchronous run/current
+					// room writes. Account-locking work stays outside this block-gate dependency.
+					return context.shard.data.set(landingKey, JSON.stringify({ user: me, startedTick: Game.time }))
+						.then(() => {});
 				} else {
 					context.task(stopRun(context.shard, me, Game.time));
 				}
