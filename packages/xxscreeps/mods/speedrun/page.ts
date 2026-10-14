@@ -89,6 +89,15 @@ tr.top1 .rank, tr.top1 .player { color: var(--gold); }
 tr.top2 .rank { color: #cfcfcf; }
 tr.top3 .rank { color: #c08a5a; }
 .player { color: var(--text-strong); }
+.player-label { display: inline-flex; align-items: center; gap: 9px; vertical-align: middle; }
+.avatar {
+	position: relative; display: inline-flex; align-items: center; justify-content: center;
+	width: 32px; height: 32px; flex: 0 0 auto; overflow: hidden; border-radius: 50%;
+	background: var(--line); color: var(--muted); font-size: 14px; font-weight: 500;
+}
+.avatar.large { width: 96px; height: 96px; font-size: 32px; }
+.avatar img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.avatar img[hidden] { display: none; }
 .room { color: var(--muted); }
 .score { color: var(--gold); font-variant-numeric: tabular-nums; }
 .bar { position: relative; height: 5px; background: #2b2b2b; min-width: 60px; }
@@ -109,6 +118,8 @@ aside {
 aside[hidden] { display: none; }
 aside > h2 { margin: 0; padding: 13px 16px; font-size: 15px; font-weight: 400; color: var(--gold); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
 aside > h2 button { margin-left: auto; }
+#detail-name { min-width: 0; overflow-wrap: anywhere; }
+#detail-avatar { display: flex; flex: 0 0 auto; }
 aside .section { padding: 13px 16px; border-bottom: 1px solid var(--line); }
 aside .section h3 { margin: 0 0 9px; font-size: 12px; font-weight: 400; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
 .scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 15; }
@@ -136,6 +147,28 @@ var escape = function(value) {
 		return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
 	});
 };
+// Use the native image endpoint for both built-in and custom badges, never inline uploaded SVG.
+function avatar(info, large) {
+	var name = info.username || '';
+	var size = large ? 96 : 32;
+	var image = info.badge && name
+		? '<img src="' + escape('/api/user/badge-svg?username=' + encodeURIComponent(name)) +
+			'" alt="" width="' + size + '" height="' + size +
+			'" loading="' + (large ? 'eager' : 'lazy') + '" decoding="async">'
+		: '';
+	return '<span class="avatar' + (large ? ' large' : '') + '" aria-hidden="true">' +
+		escape(Array.from(name)[0] || '?') + image + '</span>';
+}
+function bindAvatars(root) {
+	Array.prototype.forEach.call(root.querySelectorAll('.avatar img'), function(image) {
+		var fallback = function() { image.hidden = true; };
+		image.addEventListener('error', fallback);
+		if (image.complete && image.naturalWidth === 0) { fallback(); }
+	});
+}
+function playerLabel(info, name) {
+	return '<span class="player-label">' + avatar(info, false) + '<span>' + escape(name) + '</span></span>';
+}
 var round = function(value, digits) {
 	var factor = Math.pow(10, digits);
 	return Math.round(value * factor) / factor;
@@ -171,6 +204,7 @@ var elements = {
 	detail: document.getElementById('detail'),
 	detailBody: document.getElementById('detail-body'),
 	detailName: document.getElementById('detail-name'),
+	detailAvatar: document.getElementById('detail-avatar'),
 	live: document.getElementById('live'),
 	liveCount: document.getElementById('live-count'),
 	pager: document.getElementById('pager'),
@@ -220,9 +254,10 @@ function renderBoard(board, page) {
 		var score = entry.record || {};
 		var place = entry.rank + 1;
 		var room = score.room ? score.room : '—';
+		var info = page.users[entry.user] || {};
 		return '<tr class="clickable ' + (place <= 3 ? 'top' + place : '') + '" data-user="' + escape(entry.user) + '">' +
 			'<td class="num rank">' + place + '</td>' +
-			'<td class="player">' + escape((page.users[entry.user] || {}).username || score.username || entry.user) + '</td>' +
+			'<td class="player">' + playerLabel(info, info.username || score.username || entry.user) + '</td>' +
 			'<td class="num">' + (score.level == null ? '—' : 'RCL ' + score.level) + '</td>' +
 			'<td class="nowrap">' + progressBar(score.level || 0, score.progress || 0, score.progressTotal || 0) + '</td>' +
 			'<td class="num score">' + escape(entry.score) + '</td>' +
@@ -235,6 +270,7 @@ function renderBoard(board, page) {
 		'<thead><tr><th class="num">#</th><th>Player</th><th class="num">Level</th><th>Progress</th>' +
 		'<th class="num">Score</th><th>Room</th><th class="num">Run</th><th>Recorded</th></tr></thead>' +
 		'<tbody>' + (rows || '<tr><td colspan="8" class="empty">Nobody has finished this bracket yet.</td></tr>') + '</tbody>';
+	bindAvatars(board);
 	Array.prototype.forEach.call(board.querySelectorAll('tbody tr[data-user]'), function(row) {
 		row.addEventListener('click', function() { openDetail(row.getAttribute('data-user')); });
 	});
@@ -248,8 +284,9 @@ function renderLive(page) {
 			return '<div class="nowrap"><span class="muted">' + ticks(item.bracket) + '</span> ' +
 				(left === 'due' ? '<span class="badge">due</span>' : escape(left)) + '</div>';
 		}).join('');
+		var info = page.users[entry.user] || {};
 		return '<tr class="clickable" data-user="' + escape(entry.user) + '">' +
-			'<td class="player">' + escape((page.users[entry.user] || {}).username || entry.user) + '</td>' +
+			'<td class="player">' + playerLabel(info, info.username || entry.user) + '</td>' +
 			'<td class="room">' + escape(entry.room) + '</td>' +
 			'<td class="num">RCL ' + entry.level + '</td>' +
 			'<td class="nowrap">' + progressBar(entry.level, entry.progress, entry.progressTotal) + '</td>' +
@@ -262,6 +299,7 @@ function renderLive(page) {
 		'<thead><tr><th>Player</th><th>Room</th><th class="num">Level</th><th>Progress</th>' +
 		'<th class="num">Score</th><th>Running</th><th>Brackets</th></tr></thead>' +
 		'<tbody>' + (rows || '<tr><td colspan="7" class="empty">Nobody is on the clock right now.</td></tr>') + '</tbody>';
+	bindAvatars(elements.live);
 	Array.prototype.forEach.call(elements.live.querySelectorAll('tbody tr[data-user]'), function(row) {
 		row.addEventListener('click', function() { openDetail(row.getAttribute('data-user')); });
 	});
@@ -270,6 +308,8 @@ function renderLive(page) {
 function renderDetail(payload) {
 	var name = payload.username || payload.user;
 	elements.detailName.textContent = name;
+	elements.detailAvatar.innerHTML = avatar(payload, true);
+	bindAvatars(elements.detailAvatar);
 	var chips = payload.brackets.map(function(entry) {
 		return '<span class="chip">' + ticks(entry.bracket) + ' ticks &middot; best <b>' + escape(entry.score) + '</b></span>';
 	}).join('');
@@ -299,6 +339,7 @@ function openDetail(user) {
 	elements.detail.hidden = false;
 	elements.scrim.hidden = false;
 	elements.detailName.textContent = user;
+	elements.detailAvatar.innerHTML = avatar({}, true);
 	elements.detailBody.innerHTML = '<div class="empty">Loading…</div>';
 	if (history.replaceState) { history.replaceState(null, '', '#player=' + encodeURIComponent(user)); }
 	api('/api/speedrun/records/' + encodeURIComponent(user)).then(function(payload) {
@@ -408,7 +449,7 @@ export const speedrunPage = `<!doctype html>
 </footer>
 <div class="scrim" id="scrim" hidden></div>
 <aside id="detail" hidden>
-	<h2><span id="detail-name"></span><button class="action" id="detail-close">Close</button></h2>
+	<h2><span id="detail-avatar"></span><span id="detail-name"></span><button class="action" id="detail-close">Close</button></h2>
 	<div id="detail-body"></div>
 </aside>
 <script>${script}</script>
